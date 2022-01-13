@@ -1,0 +1,2 @@
+dataset/car/*.bin filter=lfs diff=lfs merge=lfs -text
+dataset/car/*.txt filter=lfs diff=lfs merge=lfs -text
