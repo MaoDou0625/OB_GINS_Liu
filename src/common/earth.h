@@ -26,7 +26,9 @@
 #include "types.h"
 
 #include <Eigen/Geometry>
-
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 using Eigen::Matrix3d;
 using Eigen::Quaterniond;
 using Eigen::Vector3d;
