@@ -2,9 +2,9 @@
 
 # 数据文件
 # Data files
-imufile: ""
+imufile: "D:/Code/OB_GINS/dataset/ADIS16465.txt"
 gnssfile: ""
-outputpath: ""
+outputpath: "D:/Code/OB_GINS/dataset/TEST"
 
 # 时间信息, s
 # Processing time parameters

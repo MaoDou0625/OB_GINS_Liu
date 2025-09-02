@@ -1,0 +1,17 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <CustomBuild Include="D:\Code\OB_GINS\build_debug\CMakeFiles\7faf0549907e27718361b9cb6fc8f636\NightlyMemoryCheck.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\Code\OB_GINS\src\thirdparty\abseil-cpp\CMakeLists.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="D:\Code\OB_GINS\build_debug\abseil-cpp\CMakeFiles\NightlyMemoryCheck" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="CMake Rules">
+      <UniqueIdentifier>{C603E0AC-56C6-3C88-BA71-F0D276C4B270}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

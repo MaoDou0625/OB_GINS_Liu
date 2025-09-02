@@ -1,0 +1,441 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <PreferredToolArchitecture>x64</PreferredToolArchitecture>
+  </PropertyGroup>
+  <PropertyGroup>
+    <ResolveNugetPackages>false</ResolveNugetPackages>
+  </PropertyGroup>
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="MinSizeRel|x64">
+      <Configuration>MinSizeRel</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="RelWithDebInfo|x64">
+      <Configuration>RelWithDebInfo</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{B528987F-68AC-35B0-8D87-4E5627FA2426}</ProjectGuid>
+    <Keyword>Win32Proj</Keyword>
+    <WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion>
+    <Platform>x64</Platform>
+    <ProjectName>ALL_BUILD</ProjectName>
+    <VCProjectUpgraderObjectName>NoUpgrade</VCProjectUpgraderObjectName>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Utility</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>Utility</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'" Label="Configuration">
+    <ConfigurationType>Utility</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'" Label="Configuration">
+    <ConfigurationType>Utility</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup>
+    <_ProjectFileVersion>10.0.20506.1</_ProjectFileVersion>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <Midl>
+      <AdditionalIncludeDirectories>D:\Code\OB_GINS;D:\vcpkgforOB\vcpkg\installed\x64-windows\include\eigen3;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <Midl>
+      <AdditionalIncludeDirectories>D:\Code\OB_GINS;D:\vcpkgforOB\vcpkg\installed\x64-windows\include\eigen3;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">
+    <Midl>
+      <AdditionalIncludeDirectories>D:\Code\OB_GINS;D:\vcpkgforOB\vcpkg\installed\x64-windows\include\eigen3;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">
+    <Midl>
+      <AdditionalIncludeDirectories>D:\Code\OB_GINS;D:\vcpkgforOB\vcpkg\installed\x64-windows\include\eigen3;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <CustomBuild Include="D:\Code\OB_GINS\src\thirdparty\abseil-cpp\CMakeLists.txt">
+      <UseUtf8Encoding>Always</UseUtf8Encoding>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Building Custom Rule D:/Code/OB_GINS/src/thirdparty/abseil-cpp/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SD:/Code/OB_GINS -BD:/Code/OB_GINS/build_debug --check-stamp-file D:/Code/OB_GINS/build_debug/abseil-cpp/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">C:\Program Files\CMake\share\cmake-4.1\Modules\CMakeDependentOption.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\CMakePackageConfigHelpers.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\CMakeParseArguments.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\CTest.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\CTestTargets.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\CTestUseLaunchers.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\CheckCSourceCompiles.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\CheckIncludeFile.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\CheckLibraryExists.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\DartConfiguration.tcl.in;C:\Program Files\CMake\share\cmake-4.1\Modules\FindPackageHandleStandardArgs.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\FindPackageMessage.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\FindThreads.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\GNUInstallDirs.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\Internal\CheckSourceCompiles.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\WriteBasicConfigVersionFile.cmake;C:\Program Files\CMake\share\cmake-4.1\Templates\CTestScript.cmake.in;D:\Code\OB_GINS\src\thirdparty\abseil-cpp\CMake\AbseilDll.cmake;D:\Code\OB_GINS\src\thirdparty\abseil-cpp\CMake\AbseilHelpers.cmake;D:\Code\OB_GINS\src\thirdparty\abseil-cpp\absl\copts\AbseilConfigureCopts.cmake;D:\Code\OB_GINS\src\thirdparty\abseil-cpp\absl\copts\GENERATED_AbseilCopts.cmake;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\Code\OB_GINS\build_debug\abseil-cpp\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Building Custom Rule D:/Code/OB_GINS/src/thirdparty/abseil-cpp/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SD:/Code/OB_GINS -BD:/Code/OB_GINS/build_debug --check-stamp-file D:/Code/OB_GINS/build_debug/abseil-cpp/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\Program Files\CMake\share\cmake-4.1\Modules\CMakeDependentOption.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\CMakePackageConfigHelpers.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\CMakeParseArguments.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\CTest.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\CTestTargets.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\CTestUseLaunchers.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\CheckCSourceCompiles.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\CheckIncludeFile.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\CheckLibraryExists.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\DartConfiguration.tcl.in;C:\Program Files\CMake\share\cmake-4.1\Modules\FindPackageHandleStandardArgs.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\FindPackageMessage.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\FindThreads.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\GNUInstallDirs.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\Internal\CheckSourceCompiles.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\WriteBasicConfigVersionFile.cmake;C:\Program Files\CMake\share\cmake-4.1\Templates\CTestScript.cmake.in;D:\Code\OB_GINS\src\thirdparty\abseil-cpp\CMake\AbseilDll.cmake;D:\Code\OB_GINS\src\thirdparty\abseil-cpp\CMake\AbseilHelpers.cmake;D:\Code\OB_GINS\src\thirdparty\abseil-cpp\absl\copts\AbseilConfigureCopts.cmake;D:\Code\OB_GINS\src\thirdparty\abseil-cpp\absl\copts\GENERATED_AbseilCopts.cmake;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">D:\Code\OB_GINS\build_debug\abseil-cpp\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">Building Custom Rule D:/Code/OB_GINS/src/thirdparty/abseil-cpp/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SD:/Code/OB_GINS -BD:/Code/OB_GINS/build_debug --check-stamp-file D:/Code/OB_GINS/build_debug/abseil-cpp/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">C:\Program Files\CMake\share\cmake-4.1\Modules\CMakeDependentOption.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\CMakePackageConfigHelpers.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\CMakeParseArguments.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\CTest.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\CTestTargets.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\CTestUseLaunchers.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\CheckCSourceCompiles.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\CheckIncludeFile.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\CheckLibraryExists.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\DartConfiguration.tcl.in;C:\Program Files\CMake\share\cmake-4.1\Modules\FindPackageHandleStandardArgs.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\FindPackageMessage.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\FindThreads.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\GNUInstallDirs.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\Internal\CheckSourceCompiles.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\WriteBasicConfigVersionFile.cmake;C:\Program Files\CMake\share\cmake-4.1\Templates\CTestScript.cmake.in;D:\Code\OB_GINS\src\thirdparty\abseil-cpp\CMake\AbseilDll.cmake;D:\Code\OB_GINS\src\thirdparty\abseil-cpp\CMake\AbseilHelpers.cmake;D:\Code\OB_GINS\src\thirdparty\abseil-cpp\absl\copts\AbseilConfigureCopts.cmake;D:\Code\OB_GINS\src\thirdparty\abseil-cpp\absl\copts\GENERATED_AbseilCopts.cmake;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">D:\Code\OB_GINS\build_debug\abseil-cpp\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">Building Custom Rule D:/Code/OB_GINS/src/thirdparty/abseil-cpp/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SD:/Code/OB_GINS -BD:/Code/OB_GINS/build_debug --check-stamp-file D:/Code/OB_GINS/build_debug/abseil-cpp/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">C:\Program Files\CMake\share\cmake-4.1\Modules\CMakeDependentOption.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\CMakePackageConfigHelpers.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\CMakeParseArguments.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\CTest.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\CTestTargets.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\CTestUseLaunchers.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\CheckCSourceCompiles.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\CheckIncludeFile.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\CheckLibraryExists.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\DartConfiguration.tcl.in;C:\Program Files\CMake\share\cmake-4.1\Modules\FindPackageHandleStandardArgs.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\FindPackageMessage.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\FindThreads.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\GNUInstallDirs.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\Internal\CheckSourceCompiles.cmake;C:\Program Files\CMake\share\cmake-4.1\Modules\WriteBasicConfigVersionFile.cmake;C:\Program Files\CMake\share\cmake-4.1\Templates\CTestScript.cmake.in;D:\Code\OB_GINS\src\thirdparty\abseil-cpp\CMake\AbseilDll.cmake;D:\Code\OB_GINS\src\thirdparty\abseil-cpp\CMake\AbseilHelpers.cmake;D:\Code\OB_GINS\src\thirdparty\abseil-cpp\absl\copts\AbseilConfigureCopts.cmake;D:\Code\OB_GINS\src\thirdparty\abseil-cpp\absl\copts\GENERATED_AbseilCopts.cmake;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">D:\Code\OB_GINS\build_debug\abseil-cpp\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">false</LinkObjects>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+  </ItemGroup>
+  <ItemGroup />
+  <ItemGroup>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\ZERO_CHECK.vcxproj">
+      <Project>{0D4F010F-E4B4-3300-9915-859DAF83D6BD}</Project>
+      <Name>ZERO_CHECK</Name>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\types\absl_bad_any_cast_impl.vcxproj">
+      <Project>{F17A1745-8912-3918-A9FF-29129509A2ED}</Project>
+      <Name>absl_bad_any_cast_impl</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\types\absl_bad_optional_access.vcxproj">
+      <Project>{6A9EBB92-493A-30A1-BD44-929CE608AB7F}</Project>
+      <Name>absl_bad_optional_access</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\types\absl_bad_variant_access.vcxproj">
+      <Project>{05205585-1C36-3EDB-96F7-75D94EE7FFB3}</Project>
+      <Name>absl_bad_variant_access</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\base\absl_base.vcxproj">
+      <Project>{7989CCC8-6D80-3A1C-B43F-C8E0E3F5D0C6}</Project>
+      <Name>absl_base</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\hash\absl_city.vcxproj">
+      <Project>{C8877C71-9ADC-3A59-88CA-6B64F0521DDC}</Project>
+      <Name>absl_city</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\time\absl_civil_time.vcxproj">
+      <Project>{E74266F4-9797-3552-A106-FF29DE32B471}</Project>
+      <Name>absl_civil_time</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\strings\absl_cord.vcxproj">
+      <Project>{531D8D42-9AD8-38B4-A14F-FAEB28E61E30}</Project>
+      <Name>absl_cord</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\strings\absl_cord_internal.vcxproj">
+      <Project>{E0F6BD56-E834-34C1-8B70-99995DDBB4F6}</Project>
+      <Name>absl_cord_internal</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\strings\absl_cordz_functions.vcxproj">
+      <Project>{E5B7DE4B-F6AC-3238-BEF1-2CD3E1587B0F}</Project>
+      <Name>absl_cordz_functions</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\strings\absl_cordz_handle.vcxproj">
+      <Project>{BD0187FD-4005-393E-B05D-05A87CAB2CB1}</Project>
+      <Name>absl_cordz_handle</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\strings\absl_cordz_info.vcxproj">
+      <Project>{77B80DD0-7A0D-3A51-BBA5-64D9EC836966}</Project>
+      <Name>absl_cordz_info</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\strings\absl_cordz_sample_token.vcxproj">
+      <Project>{D44D8D8F-9C45-3266-BBDA-44E11F792688}</Project>
+      <Name>absl_cordz_sample_token</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\debugging\absl_debugging_internal.vcxproj">
+      <Project>{7105AD39-3970-33D9-8116-91CA1F97414F}</Project>
+      <Name>absl_debugging_internal</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\debugging\absl_demangle_internal.vcxproj">
+      <Project>{5183BDC5-1D84-3A97-B144-F69C12A9087F}</Project>
+      <Name>absl_demangle_internal</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\debugging\absl_examine_stack.vcxproj">
+      <Project>{D106A61A-888D-3AA3-885D-96983B8CAD86}</Project>
+      <Name>absl_examine_stack</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\profiling\absl_exponential_biased.vcxproj">
+      <Project>{483556CA-63D7-388A-9D9C-7FC4BE944C79}</Project>
+      <Name>absl_exponential_biased</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\debugging\absl_failure_signal_handler.vcxproj">
+      <Project>{ED3EECC9-9C8E-3062-A423-FD13E3F06D73}</Project>
+      <Name>absl_failure_signal_handler</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\flags\absl_flags.vcxproj">
+      <Project>{6D3CE46C-2031-3F4E-9991-D70020628AB7}</Project>
+      <Name>absl_flags</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\flags\absl_flags_commandlineflag.vcxproj">
+      <Project>{657CC654-AA4C-35E5-9524-746BE4F8446D}</Project>
+      <Name>absl_flags_commandlineflag</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\flags\absl_flags_commandlineflag_internal.vcxproj">
+      <Project>{9E3364A6-BAC7-3B40-895D-BD6777780B88}</Project>
+      <Name>absl_flags_commandlineflag_internal</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\flags\absl_flags_config.vcxproj">
+      <Project>{F577A58B-605F-3D0E-8094-1C145F3D4C2D}</Project>
+      <Name>absl_flags_config</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\flags\absl_flags_internal.vcxproj">
+      <Project>{F7D8994C-4DC4-3875-BFA7-E3C4E5F88B91}</Project>
+      <Name>absl_flags_internal</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\flags\absl_flags_marshalling.vcxproj">
+      <Project>{DBD48292-FD81-3CF8-87CA-DBDA51484B29}</Project>
+      <Name>absl_flags_marshalling</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\flags\absl_flags_parse.vcxproj">
+      <Project>{93743BC8-27D2-34BF-9C0C-58D9AC127FDE}</Project>
+      <Name>absl_flags_parse</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\flags\absl_flags_private_handle_accessor.vcxproj">
+      <Project>{01F5B4CA-09CD-3DA9-90A1-787E82E5449F}</Project>
+      <Name>absl_flags_private_handle_accessor</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\flags\absl_flags_program_name.vcxproj">
+      <Project>{3429C403-D4CC-3BEF-8DA0-508F2FA98657}</Project>
+      <Name>absl_flags_program_name</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\flags\absl_flags_reflection.vcxproj">
+      <Project>{CDA7ACAF-0C2F-3C53-9248-C5CCAAD771C9}</Project>
+      <Name>absl_flags_reflection</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\flags\absl_flags_usage.vcxproj">
+      <Project>{55D7B765-F812-320A-A2C2-EF8702737153}</Project>
+      <Name>absl_flags_usage</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\flags\absl_flags_usage_internal.vcxproj">
+      <Project>{33149903-BDD2-3FE6-9E10-D47EC8DCD0CE}</Project>
+      <Name>absl_flags_usage_internal</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\synchronization\absl_graphcycles_internal.vcxproj">
+      <Project>{0D8BF385-BE89-3C56-A617-99F64742D341}</Project>
+      <Name>absl_graphcycles_internal</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\hash\absl_hash.vcxproj">
+      <Project>{6FFF68E5-A015-320B-8499-917437138E4D}</Project>
+      <Name>absl_hash</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\container\absl_hashtablez_sampler.vcxproj">
+      <Project>{F18EBBE3-1838-3ACA-81F2-A2A36E1BE860}</Project>
+      <Name>absl_hashtablez_sampler</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\numeric\absl_int128.vcxproj">
+      <Project>{B3DF6F9E-C3E1-3CB9-81F4-6E2EAFE2B625}</Project>
+      <Name>absl_int128</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\debugging\absl_leak_check.vcxproj">
+      <Project>{5ADCC41E-7843-3EAB-9735-F9104D1C2CFE}</Project>
+      <Name>absl_leak_check</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\base\absl_log_severity.vcxproj">
+      <Project>{B2661961-0104-3E00-9CFD-AC5972FFBCCE}</Project>
+      <Name>absl_log_severity</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\hash\absl_low_level_hash.vcxproj">
+      <Project>{27478FA9-4DEC-3B27-8471-C6239633792D}</Project>
+      <Name>absl_low_level_hash</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\base\absl_malloc_internal.vcxproj">
+      <Project>{E48E2AFD-6E21-3EDC-989B-DC3681CA0A0B}</Project>
+      <Name>absl_malloc_internal</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\profiling\absl_periodic_sampler.vcxproj">
+      <Project>{E964B293-73B9-3A67-86B9-E5A6F35B1947}</Project>
+      <Name>absl_periodic_sampler</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\random\absl_random_distributions.vcxproj">
+      <Project>{141C0F3F-F98A-330D-8C59-51F9C46B8186}</Project>
+      <Name>absl_random_distributions</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\random\absl_random_internal_distribution_test_util.vcxproj">
+      <Project>{A935C3E8-399A-3729-91EF-7D7735698272}</Project>
+      <Name>absl_random_internal_distribution_test_util</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\random\absl_random_internal_platform.vcxproj">
+      <Project>{5B246579-109F-3648-BF93-28903829928A}</Project>
+      <Name>absl_random_internal_platform</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\random\absl_random_internal_pool_urbg.vcxproj">
+      <Project>{A7F9DC9D-9DCC-3A2E-B0BF-DEF1D0986CE8}</Project>
+      <Name>absl_random_internal_pool_urbg</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\random\absl_random_internal_randen.vcxproj">
+      <Project>{6BAB97D8-6878-3BB5-868F-7D0546BAC0C8}</Project>
+      <Name>absl_random_internal_randen</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\random\absl_random_internal_randen_hwaes.vcxproj">
+      <Project>{53CB6526-92E9-38F0-A508-9A107B03C884}</Project>
+      <Name>absl_random_internal_randen_hwaes</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\random\absl_random_internal_randen_hwaes_impl.vcxproj">
+      <Project>{045FFA4C-A3D6-351C-AEF1-F5836F5C8798}</Project>
+      <Name>absl_random_internal_randen_hwaes_impl</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\random\absl_random_internal_randen_slow.vcxproj">
+      <Project>{855D4F49-76C1-3C6D-9476-10887C2754E8}</Project>
+      <Name>absl_random_internal_randen_slow</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\random\absl_random_internal_seed_material.vcxproj">
+      <Project>{369287EC-C6EC-3391-A376-AD0F0F2E03EB}</Project>
+      <Name>absl_random_internal_seed_material</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\random\absl_random_seed_gen_exception.vcxproj">
+      <Project>{0CDADA65-9C7D-3476-AEF0-E0A0C5F03A55}</Project>
+      <Name>absl_random_seed_gen_exception</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\random\absl_random_seed_sequences.vcxproj">
+      <Project>{210A750E-F3C9-3EE6-8ECD-919A5D4CE68F}</Project>
+      <Name>absl_random_seed_sequences</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\container\absl_raw_hash_set.vcxproj">
+      <Project>{D0CA2717-9F55-3E5C-97FC-9D74D426DF73}</Project>
+      <Name>absl_raw_hash_set</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\base\absl_raw_logging_internal.vcxproj">
+      <Project>{99859CD9-70AB-3CA5-B203-0C8836986BF1}</Project>
+      <Name>absl_raw_logging_internal</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\base\absl_scoped_set_env.vcxproj">
+      <Project>{79927D73-437D-3EA4-B437-93DD7D143654}</Project>
+      <Name>absl_scoped_set_env</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\base\absl_spinlock_wait.vcxproj">
+      <Project>{66DEA216-5320-38B7-9439-E2C17DF88A8D}</Project>
+      <Name>absl_spinlock_wait</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\debugging\absl_stacktrace.vcxproj">
+      <Project>{37685A0F-6186-3CF2-8E89-67D83124B6B0}</Project>
+      <Name>absl_stacktrace</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\status\absl_status.vcxproj">
+      <Project>{40A22BFF-3276-322F-B243-91902821ED0D}</Project>
+      <Name>absl_status</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\status\absl_statusor.vcxproj">
+      <Project>{06F0693E-6304-392E-80F4-52A9C38519A9}</Project>
+      <Name>absl_statusor</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\strings\absl_str_format_internal.vcxproj">
+      <Project>{E3F287D1-6EE8-3DE0-87D8-EC94E2325E75}</Project>
+      <Name>absl_str_format_internal</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\base\absl_strerror.vcxproj">
+      <Project>{E2A8D409-66CD-3E94-BD08-104AEF921FF4}</Project>
+      <Name>absl_strerror</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\strings\absl_strings.vcxproj">
+      <Project>{8B6AD6A2-7E74-34E4-B8AC-C48099E0DAE8}</Project>
+      <Name>absl_strings</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\strings\absl_strings_internal.vcxproj">
+      <Project>{FD19A28E-D2BD-32BD-B27D-E5E75D6D3046}</Project>
+      <Name>absl_strings_internal</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\debugging\absl_symbolize.vcxproj">
+      <Project>{6FAA3F50-5995-3B20-A3DB-190655CE36B5}</Project>
+      <Name>absl_symbolize</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\synchronization\absl_synchronization.vcxproj">
+      <Project>{7DB840E6-D350-3463-B31D-5F0295A86E41}</Project>
+      <Name>absl_synchronization</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\base\absl_throw_delegate.vcxproj">
+      <Project>{E5854B05-DC09-35B6-A7FF-923A824366A5}</Project>
+      <Name>absl_throw_delegate</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\time\absl_time.vcxproj">
+      <Project>{E2663906-AD49-3579-888E-B4DC6DD43A6A}</Project>
+      <Name>absl_time</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Code\OB_GINS\build_debug\abseil-cpp\absl\time\absl_time_zone.vcxproj">
+      <Project>{ED747CBF-05B4-3E92-9B97-E585620D5932}</Project>
+      <Name>absl_time_zone</Name>
+    </ProjectReference>
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>
