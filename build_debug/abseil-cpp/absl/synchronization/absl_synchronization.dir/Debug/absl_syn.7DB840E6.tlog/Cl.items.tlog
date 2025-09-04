@@ -1,7 +1,0 @@
-D:\Code\OB_GINS\src\thirdparty\abseil-cpp\absl\synchronization\barrier.cc;D:\Code\OB_GINS\build_debug\abseil-cpp\absl\synchronization\absl_synchronization.dir\Debug\barrier.obj
-D:\Code\OB_GINS\src\thirdparty\abseil-cpp\absl\synchronization\blocking_counter.cc;D:\Code\OB_GINS\build_debug\abseil-cpp\absl\synchronization\absl_synchronization.dir\Debug\blocking_counter.obj
-D:\Code\OB_GINS\src\thirdparty\abseil-cpp\absl\synchronization\internal\create_thread_identity.cc;D:\Code\OB_GINS\build_debug\abseil-cpp\absl\synchronization\absl_synchronization.dir\Debug\create_thread_identity.obj
-D:\Code\OB_GINS\src\thirdparty\abseil-cpp\absl\synchronization\internal\per_thread_sem.cc;D:\Code\OB_GINS\build_debug\abseil-cpp\absl\synchronization\absl_synchronization.dir\Debug\per_thread_sem.obj
-D:\Code\OB_GINS\src\thirdparty\abseil-cpp\absl\synchronization\internal\waiter.cc;D:\Code\OB_GINS\build_debug\abseil-cpp\absl\synchronization\absl_synchronization.dir\Debug\waiter.obj
-D:\Code\OB_GINS\src\thirdparty\abseil-cpp\absl\synchronization\notification.cc;D:\Code\OB_GINS\build_debug\abseil-cpp\absl\synchronization\absl_synchronization.dir\Debug\notification.obj
-D:\Code\OB_GINS\src\thirdparty\abseil-cpp\absl\synchronization\mutex.cc;D:\Code\OB_GINS\build_debug\abseil-cpp\absl\synchronization\absl_synchronization.dir\Debug\mutex.obj

@@ -1,3 +1,34 @@
+# Build outputs
 bin/
+lib/
+out/
 build/
-.vscode/dataset/
+build_debug/
+build_release/
+cmake-build-*/
+
+# Visual Studio / MSBuild
+.vs/
+*.vcxproj.user
+*.suo
+*.user
+*.obj
+*.pdb
+*.ilk
+*.tlog
+*.lastbuildstate
+*.log
+*.recipe
+
+# CMake generated (when building in-tree)
+CMakeCache.txt
+CMakeFiles/
+Testing/
+
+# Dataset outputs (keep raw inputs)
+dataset/liu/
+dataset/*IMU_ERR*
+dataset/*.nav
+
+# Misc
+*.bak
