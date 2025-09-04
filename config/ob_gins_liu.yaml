@@ -1,74 +1,78 @@
 # OB_GINS: Optimization-Based GNSS/INS Integrated Navigation System
 
-# 数据文件
 # Data files
-imufile: "D:/Code/OB_GINS/dataset/car/Body_imu.txt"
-gnssfile: ""
+imufile: "D:/Code/OB_GINS/dataset/ADIS16465.txt"
+gnssfile: "D:/Code/OB_GINS/dataset/GNSS_RTK.pos"
 outputpath: "D:/Code/OB_GINS/dataset/liu"
 
-# 时间信息, s
-# Processing time parameters
+# Processing time parameters (s)
 windows: 30
 starttime: 357473
 endtime: 359090
 
-# 迭代次数
-# number of iterations
+# Number of iterations
 num_iterations: 20
 
-# 进行GNSS粗差检测
-# Do GNSS outlier culling
+# GNSS outlier culling
 is_outlier_culling: false
 
-# 初始化信息
 # Initialization parameters
-initvel: [ 0, 0, 0 ]   # 北东地速度 (NED velocity), m/s
-initatt: [ 0, 0, 276 ] # 横滚俯仰航向 (RPY attitude), deg
+initvel: [ 0, 0, 0 ]   # NED velocity (m/s)
+initatt: [ 0, 0, 276 ] # RPY attitude (deg)
 
-# IMU初始误差
-# IMU constant biases
-initgb: [ 0, 0, 0 ]  # 初始陀螺零偏 (gyroscope biases), deg/hr
-initab: [ 0, 0, 0 ]  # 初始加表零偏 (accelerometer biases), mGal
+# IMU initial biases
+initgb: [ 0, 0, 0 ]  # Gyroscope bias (deg/hr)
+initab: [ 0, 0, 0 ]  # Accelerometer bias (mGal)
 
-# IMU文件数据列数 (7-imu only, 8-with odometer)
-# IMU data file columns
+# IMU data file columns (7: IMU only, 8: with odometer)
 imudatalen: 8
-# IMU原始数据频率, Hz
-# IMU data rate
+# IMU data rate (Hz)
 imudatarate: 200
 
-# 考虑地球自转补偿项
-# consider the Earth's rotation
+# Consider Earth's rotation
 isearth: true
 
-# 安装参数
 # Installation parameters
-antlever: [ -0.073, 0.302, 0.087 ]  # 天线杆臂 (antenna lever), IMU前右下方向, m
-odolever: [ -0.64, -0.628, 2.122 ]  # 里程计杆臂 (odometer lever), IMU前右下方向, m
-bodyangle: [ 0, -0.30, -1.09 ]       # IMU到载体的旋转角 (mouting angles to construct C_b^v), deg
+antlever: [ -0.073, 0.302, 0.087 ]  # Antenna lever (m), IMU front-right-down
+odolever: [ -0.64, -0.628, 2.122 ]  # Odometer lever (m), IMU front-right-down
+bodyangle: [ 0, -0.30, -1.09 ]      # Mounting angles to construct C_b^v (deg)
 
 odometer:
-    isuseodo: true              # use odometer
+    isuseodo: true                   # Use odometer
+    std: [ 0.05, 0.05, 0.05 ]        # Vehicle velocity standard deviation (m/s)
+    srw: 100                         # Odometer scale-factor std (PPM)
+    file: "D:/Code/OB_GINS/dataset/odometer.txt"   # Odometer file (time, v)
+    columns: 2                        # 2: time,v; 3: time,v_l,v_r (averaged)
+    # Optional overrides for ODO installation (if different from global odolever/bodyangle)
+    # lever: [ -0.64, -0.628, 2.122 ]           # Odometer lever (m) in body frame (front-right-down)
+    # odoangle: [ 0, -0.30, -1.09 ]             # Base R_b^w angles (deg), roll/pitch/yaw; default=bodyangle
+    factor:
+        huber_delta: 1.0             # Huber loss delta
+        low_speed_thresh: 0.2        # m/s; below this, strong downweight
+        low_speed_scale: 5.0         # sigma multiplier when below threshold
+        yaw_rate_thresh: 0.5         # rad/s; turning aggressively
+        yaw_rate_scale: 2.0          # sigma multiplier when above threshold
+        accel_thresh: 3.0            # m/s^2; harsh accel/brake
+        accel_scale: 2.0             # sigma multiplier when above threshold
+        sodo_prior_sigma: 0.02       # scale prior std (unitless)
+        rbw_prior_sigma_deg: 3.0     # prior std for R_b^w delta-angles (deg)
+        use_nhc: true                # enable nonholonomic constraint (lateral/vertical velocity ~ 0)
+        nhc_sigma: 0.1               # NHC standard deviation (m/s)
+        nhc_huber_delta: 0.5         # robust loss delta for NHC
 
-    std: [ 0.05, 0.05, 0.05 ]   # 里程标准差 (vehicle velocity standard deviation), m/s
-    srw: 100                    # 比例因子误差 (odometer scale-factor standard deviation), PPM
-
-# IMU噪声建模参数
 # IMU noise parameters
 imumodel:
     arw: 0.1     # deg/sqrt(hr)
     vrw: 0.1     # m/s/sqrt(hr)
-    gbstd: 25.0   # deg/hr
-    abstd: 200.0  # mGal
+    gbstd: 25.0  # deg/hr
+    abstd: 200.0 # mGal
     corrtime: 1.0 # hr
 
-# GNSS仿真中断配置
 # GNSS outage parameters
-isuseoutage: true
+isuseoutage: false
 outagetime: 357900
 outagelen: 60
 outageperiod: 150
 
-# 固定阈值GNSS抗差 (m)
-# a fixed threshold for GNSS outlier-culling using positioning standard deviation
+# GNSS outlier threshold (m)
 gnssthreshold: 0.2
