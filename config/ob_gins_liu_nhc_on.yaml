@@ -1,0 +1,58 @@
+imufile: "D:/Code/OB_GINS/dataset/ADIS16465.txt"
+gnssfile: "D:/Code/OB_GINS/dataset/GNSS_RTK.pos"
+outputpath: "D:/Code/OB_GINS/dataset/liu_nhc_on"
+
+windows: 30
+starttime: 357473
+endtime: 357593   # shorter window for quick comparison (120 s)
+
+num_iterations: 20
+is_outlier_culling: false
+
+initvel: [ 0, 0, 0 ]
+initatt: [ 0, 0, 276 ]
+initgb: [ 0, 0, 0 ]
+initab: [ 0, 0, 0 ]
+
+imudatalen: 8
+imudatarate: 200
+isearth: true
+
+antlever: [ -0.073, 0.302, 0.087 ]
+odolever: [ -0.64, -0.628, 2.122 ]
+bodyangle: [ 0, -0.30, -1.09 ]
+
+odometer:
+  isuseodo: true
+  std: [ 0.05, 0.05, 0.05 ]
+  srw: 100
+  file: "D:/Code/OB_GINS/dataset/odometer.txt"
+  columns: 2
+  factor:
+    huber_delta: 1.0
+    low_speed_thresh: 0.2
+    low_speed_scale: 5.0
+    yaw_rate_thresh: 0.5
+    yaw_rate_scale: 2.0
+    accel_thresh: 3.0
+    accel_scale: 2.0
+    sodo_prior_sigma: 0.02
+    rbw_prior_sigma_deg: 3.0
+    use_nhc: true
+    nhc_sigma: 0.1
+    nhc_huber_delta: 0.5
+
+imumodel:
+  arw: 0.1
+  vrw: 0.1
+  gbstd: 25.0
+  abstd: 200.0
+  corrtime: 1.0
+
+isuseoutage: false
+outagetime: 357900
+outagelen: 60
+outageperiod: 150
+
+gnssthreshold: 0.2
+
