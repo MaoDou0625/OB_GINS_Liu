@@ -102,11 +102,64 @@ cd ~/OB_GINS
 
 We offer a demo dataset with configuration file, which are located at **dataset** directory.
 
-### 3.2 awesome-gins-datasets
+### 3.2 Car dataset notes (IMU/GNSS/ODO formats)
+
+The car dataset under `dataset/car/` uses raw binary logs and needs a light preprocessing before running OB_GINS.
+
+- IMU (Body-IMU/C1_imu.bin)
+  - Format: float64, N×7 → `[t, gx, gy, gz, ax, ay, az]` where `g*` in rad/s and `a*` in m/s² at 200 Hz; `t` is GPS SOW (seconds).
+  - OB_GINS expects per-sample increments (Δθ, Δv). Convert rates to increments per interval k using trapezoidal integration:
+    - Δθ_k = 0.5 · (ω_k + ω_{k+1}) · Δt_k
+    - Δv_k = 0.5 · (a_k + a_{k+1}) · Δt_k
+    - Row timestamp = interval end time t_{k+1}
+  - Save to 7-column text: `t, dθx, dθy, dθz, dvx, dvy, dvz`, e.g. `dataset/car/Body-IMU/C1_imu_increments.txt`
+  - Config: `imufile: .../C1_imu_increments.txt`, `imudatalen: 7`, `imudatarate: 200`
+
+- GNSS (Ground Truth/GINS.bin)
+  - Format: float64, N×5, alternating rows. Keep only the position rows (time > 1).
+  - Convert to POS text (7 cols): `time lat lon h sN sE sU` with lat/lon in degrees and height in meters (e.g. std = 0.020 0.020 0.050).
+  - Config: `gnssfile: .../Ground Truth/GINS_all.pos`
+
+- Odometer (Odometer/odo.bin)
+  - Format: float64, N×4 → `[tL, vL, tR, vR]` (m/s).
+  - Split into `odo_left.txt` (time vL) and `odo_right.txt` (time vR); set `odometer_left/right.isuseodo: true`, `columns: 2`.
+
+- Recommended settings
+  - Time window (overlap): e.g. `starttime: 353650`, `endtime: 356251`
+  - Installation: `antlever: [ -0.073, 0.302, 0.087 ]`, `bodyangle: [ 0, -0.30, -1.09 ]`
+  - NHC: enable to stabilize wheeled motion (`nhc.use_nhc: true` or `odometer.factor.use_nhc: true`)
+
+- Common pitfalls
+  - Do not feed raw rates to a 7-column increment config — always convert to Δθ/Δv first.
+  - Ensure units: POS lat/lon are degrees; IMU rates are SI; time is GPS SOW.
+
+Minimal NumPy conversion (example):
+
+```python
+import numpy as np, os
+root = r'D:/Code/OB_GINS/dataset/car'
+# IMU rates -> increments
+M = np.fromfile(os.path.join(root,'Body-IMU','C1_imu.bin'), dtype=np.float64).reshape(-1,7)
+t, gyr, acc = M[:,0], M[:,1:4], M[:,4:7]
+dt = np.diff(t)
+dtheta = 0.5*(gyr[:-1]+gyr[1:]) * dt[:,None]
+dvel   = 0.5*(acc[:-1]+acc[1:]) * dt[:,None]
+out = np.column_stack([t[1:], dtheta, dvel])
+np.savetxt(os.path.join(root,'Body-IMU','C1_imu_increments.txt'), out,
+           fmt='%.9f %.9e %.9e %.9e %.9e %.9e %.9e')
+# GNSS bin -> POS
+G = np.fromfile(os.path.join(root,'Ground Truth','GINS.bin'), dtype=np.float64).reshape(-1,5)
+pos = G[G[:,0] > 1.0]
+with open(os.path.join(root,'Ground Truth','GINS_all.pos'),'w') as f:
+    for ti, la, lo, h, _ in pos:
+        f.write(f"{ti:10.3f}  {la:.10f}  {lo:.10f}     {h:.3f}    0.020    0.020    0.050\n")
+```
+
+### 3.3 awesome-gins-datasets
 
 One can find our open-source datasets at **[awesome-gins-datasets](https://github.com/i2Nav-WHU/awesome-gins-datasets)**.
 
-### 3.3 Your own dataset
+### 3.4 Your own dataset
 
 The data formats used in OB_GINS are the same as the formats defined at **[awesome-gins-datasets](https://github.com/i2Nav-WHU/awesome-gins-datasets)**. You can follow the formats to prepare your own datasets, or you can modify the source code as you need.
 
