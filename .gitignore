@@ -32,3 +32,13 @@ dataset/*.nav
 
 # Misc
 *.bak
+# Car dataset generated files (ignore derived outputs)
+dataset/car/out_car/
+dataset/**/OB_GINS_*.nav
+dataset/**/OB_GINS_*.bin
+dataset/car/**/GINS_all.pos
+dataset/car/Body-IMU/C1_imu_increments.txt
+dataset/car/Odometer/odo_left.txt
+dataset/car/Odometer/odo_right.txt
+# Worktree/temp
+OB_GINS_wt/
