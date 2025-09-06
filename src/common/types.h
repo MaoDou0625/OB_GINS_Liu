@@ -46,6 +46,13 @@ typedef struct IMU {
     double odovel;
 } IMU;
 
+// Wheel-IMU raw rate sample (float64 rates: rad/s, m/s^2)
+typedef struct WIMU {
+    double time;      // seconds
+    Eigen::Vector3d omega; // rad/s
+    Eigen::Vector3d acc;   // m/s^2
+} WIMU;
+
 typedef struct Pose {
     Matrix3d R;
     Vector3d t;
