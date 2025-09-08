@@ -43,6 +43,8 @@
 #include <absl/time/clock.h>
 #include <deque>
 #include <iomanip>
+#include <cmath>
+#include <memory>
 #include <yaml-cpp/yaml.h>
 
 #define INTEGRATION_LENGTH 1.0
@@ -53,6 +55,17 @@ void imuInterpolation(const IMU &imu01, IMU &imu00, IMU &imu11, double mid);
 
 void writeNavResult(double time, const Vector3d &origin, const IntegrationState &state, FileSaver &navfile,
                     FileSaver &errfile);
+
+// Helper container for optional left/right odometer streams
+struct OdoSource {
+    std::string name;
+    std::unique_ptr<OdoFileLoader> loader;   // may be null if disabled
+    std::deque<ODO> buffer;                  // measurements within window
+    ODO curr{};                              // latest read sample
+    Vector3d lever = Vector3d::Zero();       // lever arm (m)
+    Vector3d base_angle = Vector3d::Zero();  // odo mounting angles (deg in YAML -> rad here)
+    bool enabled = false;
+};
 
 int main(int argc, char *argv[]) {
 
@@ -152,30 +165,58 @@ int main(int argc, char *argv[]) {
     parameters->lodo    = odolever;
     parameters->abv     = bodyangle;
 
-    // Standalone ODO file (optional; required if isuseodo is true)
-    OdoFileLoader *odofile_ptr = nullptr;
-    YAML::Node odo_cfg         = config["odometer"];
+    // Parse odometer sources: support legacy `odometer` and per-wheel `odometer_left/right`
+    YAML::Node odo_cfg = config["odometer"];
+    std::vector<OdoSource> odo_sources;
+    auto load_odo_node = [&](const YAML::Node &node, const std::string &tag) {
+        OdoSource src;
+        src.name = tag;
+        if (!node || !node["isuseodo"] || !node["isuseodo"].as<bool>()) {
+            src.enabled = false;
+            return src;
+        }
+        if (!node["file"]) {
+            std::cout << "Odometer(" << tag << ") enabled but no file specified in config" << std::endl;
+            return src;
+        }
+        std::string path = node["file"].as<std::string>();
+        int cols         = node["columns"] ? node["columns"].as<int>() : 2;
+        src.loader       = std::make_unique<OdoFileLoader>(path, cols);
+        if (!src.loader->isOpen()) {
+            std::cout << "Failed to open odometer file: " << path << std::endl;
+            src.loader.reset();
+            return src;
+        }
+        // lever (fallback to odolever)
+        src.lever = odolever;
+        if (node["lever"]) {
+            auto lv = node["lever"].as<std::vector<double>>();
+            if (lv.size() == 3) src.lever = Vector3d(lv.data());
+        }
+        // odoangle (fallback to bodyangle)
+        src.base_angle = bodyangle;
+        if (node["odoangle"]) {
+            auto ang = node["odoangle"].as<std::vector<double>>();
+            if (ang.size() == 3) src.base_angle = Vector3d(ang.data()) * D2R;
+        }
+        src.enabled = true;
+        return src;
+    };
+    // Legacy single odometer
     if (isuseodo) {
-        if (!odo_cfg["file"]) {
-            std::cout << "Odometer enabled but no odometer.file specified in config" << std::endl;
-            return -1;
-        }
-        std::string odopath = odo_cfg["file"].as<std::string>();
-        int odocolumns      = odo_cfg["columns"] ? odo_cfg["columns"].as<int>() : 2;
-        odofile_ptr         = new OdoFileLoader(odopath, odocolumns);
-        if (!odofile_ptr->isOpen()) {
-            std::cout << "Failed to open odometer file" << std::endl;
-            return -1;
-        }
-        // Optional overrides for ODO installation parameters (position/orientation)
-        // lever in meters, odoangle in degrees
-        if (odo_cfg["lever"]) {
-            auto lv = odo_cfg["lever"].as<std::vector<double>>();
-            if (lv.size() == 3) {
-                parameters->lodo = Vector3d(lv.data());
-            }
-        }
+        auto src = load_odo_node(odo_cfg, "odometer");
+        if (src.enabled) odo_sources.push_back(std::move(src));
     }
+    // Per-wheel nodes (optional)
+    if (config["odometer_left"]) {
+        auto src = load_odo_node(config["odometer_left"], "left");
+        if (src.enabled) odo_sources.push_back(std::move(src));
+    }
+    if (config["odometer_right"]) {
+        auto src = load_odo_node(config["odometer_right"], "right");
+        if (src.enabled) odo_sources.push_back(std::move(src));
+    }
+    bool has_odo_sources = !odo_sources.empty();
 
     // ODO factor configuration (robust loss, adaptive thresholds, priors)
     double odo_huber_delta        = 1.0;
@@ -231,11 +272,13 @@ int main(int argc, char *argv[]) {
 
     // Align ODO stream to start time
     std::deque<ODO> odolist;
-    ODO odo;
-    if (isuseodo) {
-        odo = odofile_ptr->next();
-        while (odo.time < starttime && !odofile_ptr->isEof()) {
-            odo = odofile_ptr->next();
+    if (has_odo_sources) {
+        for (auto &src : odo_sources) {
+            if (!src.loader) continue;
+            src.curr = src.loader->next();
+            while (src.curr.time < starttime && !src.loader->isEof()) {
+                src.curr = src.loader->next();
+            }
         }
     }
 
@@ -310,6 +353,8 @@ int main(int argc, char *argv[]) {
         while (!imuqueue.empty() && imuqueue.front().time < timelist.front() - 2.0 * INTEGRATION_LENGTH) {
             imuqueue.pop_front();
         }
+
+        // No additional high-rate write here; nodes are now at INTEGRATION_LENGTH (e.g., 0.01s)
 
         imu_pre = imu_cur;
         imu_cur = imufile.next();
@@ -429,86 +474,73 @@ int main(int argc, char *argv[]) {
                     problem.AddResidualBlock(factor, nullptr, statedatalist[preintegrationlist.size()].mix);
                 }
 
-                // Add wheel-speed (odometer) factors as a separate measurement stream
-                if (isuseodo) {
+                // Add wheel-speed (odometer) factors as separate measurement streams
+                if (has_odo_sources) {
                     // Advance ODO buffer up to the latest node time
-                    while (odofile_ptr && !odofile_ptr->isEof() && odo.time <= *timelist.rbegin()) {
-                        odolist.push_back(odo);
-                        odo = odofile_ptr->next();
-                    }
+                    {
+                        // Add shared parameters (scale and rbw) once
+                        const int mix_dim = Preintegration::numMixParameter(preintegration_options);
+                        ceres::LossFunction *odo_loss = new ceres::HuberLoss(odo_huber_delta);
 
-                    // Remove outdated ODO measurements beyond the window
-                    while (!odolist.empty() && odolist.front().time < timelist.front() - 0.5 * INTEGRATION_LENGTH) {
-                        odolist.pop_front();
-                    }
+                        static double sodo_param = 1.0; // global scale across sources
+                        problem.AddParameterBlock(&sodo_param, 1);
+                        problem.AddResidualBlock(new SodoPriorFactor(1.0, sodo_prior_sigma), nullptr, &sodo_param);
 
-                    // Add ODO residuals by mapping to the nearest node
-                    const int mix_dim   = Preintegration::numMixParameter(preintegration_options);
-                    const Vector3d lodo = parameters->lodo;                               // lever arm (body)
-                    ceres::LossFunction *odo_loss = new ceres::HuberLoss(odo_huber_delta);
+                        static double rbw_param[3] = {0.0, 0.0, 0.0};
+                        problem.AddParameterBlock(rbw_param, 3);
+                        problem.AddResidualBlock(new AnglesPriorFactor(rbw_prior_sigma_rad), nullptr, rbw_param);
 
-                    static double sodo_param = 1.0; // global scale
-                    problem.AddParameterBlock(&sodo_param, 1);
-                    problem.AddResidualBlock(new SodoPriorFactor(1.0, sodo_prior_sigma), nullptr, &sodo_param);
+                        for (auto &src : odo_sources) {
+                            if (!src.loader) continue;
+                            // Read forward to the latest node time
+                            while (!src.loader->isEof() && src.curr.time <= *timelist.rbegin()) {
+                                src.buffer.push_back(src.curr);
+                                src.curr = src.loader->next();
+                            }
+                            // Drop outdated
+                            while (!src.buffer.empty() && src.buffer.front().time < timelist.front() - 0.5 * INTEGRATION_LENGTH) {
+                                src.buffer.pop_front();
+                            }
+                            // Build residuals for this source
+                            for (const auto &m : src.buffer) {
+                                if (m.time < timelist.front() - MINIMUM_INTERVAL || m.time > timelist.back() + MINIMUM_INTERVAL) {
+                                    continue;
+                                }
+                                // Find nearest node index
+                                size_t nearest = 0; double best = 1e9;
+                                for (size_t i = 0; i < timelist.size(); ++i) {
+                                    double d = fabs(m.time - timelist[i]);
+                                    if (d < best) { best = d; nearest = i; }
+                                }
+                                // Approximate omega/acc at measurement time
+                                Vector3d omega_b = Vector3d::Zero();
+                                Vector3d acc_b   = Vector3d::Zero();
+                                for (size_t ii = 1; ii < imuqueue.size(); ++ii) {
+                                    if (imuqueue[ii - 1].time <= m.time && imuqueue[ii].time >= m.time) {
+                                        double dt  = std::max(imuqueue[ii].dt, 1e-6);
+                                        omega_b    = imuqueue[ii].dtheta / dt;
+                                        acc_b      = imuqueue[ii].dvel / dt;
+                                        break;
+                                    }
+                                }
+                                if (omega_b.isZero(0)) {
+                                    omega_b = (omega_nodes.size() > nearest) ? omega_nodes[nearest] : Vector3d::Zero();
+                                }
+                                // Adaptive sigma
+                                double sigma = parameters->odo_std[0];
+                                if (fabs(m.vel) < odo_low_speed_thresh) sigma *= odo_low_speed_scale;
+                                if (fabs(omega_b.z()) > odo_yaw_rate_thresh) sigma *= odo_yaw_rate_scale;
+                                if (acc_b.norm() > odo_accel_thresh) sigma *= odo_accel_scale;
 
-                    // Global calibration for R_b^v as delta angles (roll,pitch,yaw) around config bodyangle
-                    static double rbw_param[3] = {0.0, 0.0, 0.0};
-                    problem.AddParameterBlock(rbw_param, 3);
-                    problem.AddResidualBlock(new AnglesPriorFactor(rbw_prior_sigma_rad), nullptr, rbw_param);
-
-                    for (const auto &m : odolist) {
-                        if (m.time < timelist.front() - MINIMUM_INTERVAL || m.time > timelist.back() + MINIMUM_INTERVAL) {
-                            continue;
-                        }
-
-                        size_t nearest = 0;
-                        double best    = 1e9;
-                        for (size_t i = 0; i < timelist.size(); ++i) {
-                            double d = fabs(m.time - timelist[i]);
-                            if (d < best) {
-                                best    = d;
-                                nearest = i;
+                                Vector3d omega_x_l = omega_b.cross(src.lever);
+                                auto factor        = new OdoFactor(m.vel, sigma, omega_x_l, mix_dim, src.base_angle);
+                                problem.AddResidualBlock(factor, odo_loss,
+                                                         statedatalist[nearest].pose,
+                                                         statedatalist[nearest].mix,
+                                                         &sodo_param,
+                                                         rbw_param);
                             }
                         }
-
-                        // Extract more precise omega and acc near this measurement time
-                        Vector3d omega_b = Vector3d::Zero();
-                        Vector3d acc_b   = Vector3d::Zero();
-                        for (size_t ii = 1; ii < imuqueue.size(); ++ii) {
-                            if (imuqueue[ii - 1].time <= m.time && imuqueue[ii].time >= m.time) {
-                                double dt  = std::max(imuqueue[ii].dt, 1e-6);
-                                omega_b    = imuqueue[ii].dtheta / dt;
-                                acc_b      = imuqueue[ii].dvel / dt;
-                                break;
-                            }
-                        }
-                        if (omega_b.isZero(0)) {
-                            // fallback to last at-nearest node
-                            omega_b = (omega_nodes.size() > nearest) ? omega_nodes[nearest] : Vector3d::Zero();
-                        }
-
-                        // Adaptive downweighting: low-speed, high yaw-rate, high acceleration
-                        double sigma = parameters->odo_std[0];
-                        if (fabs(m.vel) < odo_low_speed_thresh) sigma *= odo_low_speed_scale;         // near standstill
-                        if (fabs(omega_b.z()) > odo_yaw_rate_thresh) sigma *= odo_yaw_rate_scale;     // aggressive turn
-                        if (acc_b.norm() > odo_accel_thresh) sigma *= odo_accel_scale;                // harsh accel/brake
-
-                    // Use odoangle as base if provided; otherwise fallback to bodyangle
-                    Vector3d odo_base_angle = bodyangle;
-                    if (odo_cfg["odoangle"]) {
-                        auto ang = odo_cfg["odoangle"].as<std::vector<double>>();
-                        if (ang.size() == 3) {
-                            odo_base_angle = Vector3d(ang.data()) * D2R;
-                        }
-                    }
-
-                    Vector3d omega_x_l = omega_b.cross(lodo);
-                    auto factor        = new OdoFactor(m.vel, sigma, omega_x_l, mix_dim, odo_base_angle);
-                        problem.AddResidualBlock(factor, odo_loss,
-                                                 statedatalist[nearest].pose,
-                                                 statedatalist[nearest].mix,
-                                                 &sodo_param,
-                                                 rbw_param);
                     }
                 }
 
@@ -716,10 +748,6 @@ int main(int argc, char *argv[]) {
     errfile.close();
     imufile.close();
     gnssfile.close();
-    if (odofile_ptr) {
-        delete odofile_ptr;
-        odofile_ptr = nullptr;
-    }
 
     auto te = absl::Now();
     std::cout << std::endl << std::endl << "Cost " << absl::ToDoubleSeconds(te - ts) << " s in total" << std::endl;

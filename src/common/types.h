@@ -51,4 +51,10 @@ typedef struct Pose {
     Vector3d t;
 } Pose;
 
+// Simple odometer measurement
+typedef struct ODO {
+    double time;
+    double vel;
+} ODO;
+
 #endif // TYPES_H

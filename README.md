@@ -94,6 +94,68 @@ cd ~/OB_GINS
 ./bin/ob_gins ./dataset/ob_gins.yaml
 
 # Wait until the program finish
+
+## 2.1 Windows (MSVC + vcpkg) quick build
+
+We provide a helper script for MSVC + vcpkg users:
+
+```
+build_ob_gins_win.bat
+```
+
+Defaults assume MSVC 2022 at `D:\VisualStudio\2022` and vcpkg at `D:\vcpkgforOB\vcpkg`. Adjust paths inside the script if needed.
+
+Run it from the repo root to configure and build OB_GINS with vcpkg toolchain.
+
+## 2.2 One‑click run + evaluate (example)
+
+We also include a convenience script to run a 30 s example (ADIS + GNSS) and evaluate against truth:
+
+```
+tools\run_liu_30s_and_eval.bat [--vs "<vcvars64.bat>"] [--toolchain "<vcpkg cmake toolchain>"] [--yaml <config.yaml>] [--nav <nav_out>] [--truth <truth.nav>] [--out <csv>]
+```
+
+It will:
+- Build OB_GINS (via MSVC + vcpkg)
+- Run `config/run_liu_30s_no_odo.yaml`
+- Compare the navigation result against `dataset/truth.nav` at 200 Hz
+- Save per‑sample errors to `out/liu_30s_no_odo/nav_vs_truth_200hz.csv`
+  You can override VS/vcpkg paths with flags, e.g.:
+
+```
+tools\run_liu_30s_and_eval.bat --vs "C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Auxiliary\\Build\\vcvars64.bat" ^
+  --toolchain "C:/vcpkg/scripts/buildsystems/vcpkg.cmake"
+```
+
+## 6 Evaluation
+
+### 6.1 Compare against GNSS (1 Hz)
+
+Use the provided script to align nav at integer seconds and compute RMSE vs GNSS:
+
+```
+python tools/compare_nav_gnss.py <nav1> <nav2> <gnss>
+```
+
+### 6.2 Compare against 200 Hz truth via interpolation
+
+Use the 200 Hz comparator to interpolate nav onto truth timestamps and compute errors per sample:
+
+```
+python tools/compare_nav_truth_200hz.py <nav_path> <truth_path> --out <out_csv>
+
+# example
+python tools/compare_nav_truth_200hz.py \
+  out/liu_30s_no_odo/OB_GINS_TXT.nav \
+  dataset/truth.nav \
+  --out out/liu_30s_no_odo/nav_vs_truth_200hz.csv
+```
+
+This produces both summary metrics (RMSE, max) and a CSV with columns:
+
+```
+time,dx,dy,dz,horiz,err3d
+```
 ```
 
 ## 3 Datasets
