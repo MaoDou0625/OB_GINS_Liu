@@ -109,10 +109,11 @@ Run it from the repo root to configure and build OB_GINS with vcpkg toolchain.
 
 ## 2.2 One‑click run + evaluate (example)
 
-We also include a convenience script to run a 30 s example (ADIS + GNSS) and evaluate against truth:
+We also include convenience scripts to run a 30 s example (ADIS + GNSS) and evaluate against truth:
 
 ```
-tools\run_liu_30s_and_eval.bat [--vs "<vcvars64.bat>"] [--toolchain "<vcpkg cmake toolchain>"] [--yaml <config.yaml>] [--nav <nav_out>] [--truth <truth.nav>] [--out <csv>]
+Batch:      tools\run_liu_30s_and_eval.bat [--vs "<vcvars64.bat>"] [--toolchain "<vcpkg cmake toolchain>"] [--yaml <config.yaml>] [--nav <nav_out>] [--truth <truth.nav>] [--out <csv>]
+PowerShell: powershell -ExecutionPolicy Bypass -File tools\run_liu_30s_and_eval.ps1 -vs "<vcvars64.bat>" -toolchain "<vcpkg cmake toolchain>" -yaml <config.yaml> -nav <nav_out> -truth <truth.nav> -out <csv>
 ```
 
 It will:
