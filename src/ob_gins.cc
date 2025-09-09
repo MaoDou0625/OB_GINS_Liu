@@ -158,15 +158,28 @@ int main(int argc, char *argv[]) {
     parameters->acc_bias_std = config["imumodel"]["abstd"].as<double>() * 1.0e-5;
     parameters->corr_time    = config["imumodel"]["corrtime"].as<double>() * 3600;
 
-    bool isuseodo       = config["odometer"]["isuseodo"].as<bool>();
-    vec                 = config["odometer"]["std"].as<std::vector<double>>();
-    parameters->odo_std = Vector3d(vec.data());
-    parameters->odo_srw = config["odometer"]["srw"].as<double>() * 1e-6;
+    // Odometer base options (optional block). Provide safe defaults if missing.
+    YAML::Node odo_root  = config["odometer"];
+    bool isuseodo        = false;
+    Vector3d odo_std_def(0.05, 0.05, 0.05);
+    double odo_srw_def   = 100.0 * 1e-6; // 100 ppm
+    if (odo_root && odo_root["isuseodo"]) {
+        isuseodo = odo_root["isuseodo"].as<bool>();
+    }
+    if (odo_root && odo_root["std"]) {
+        vec = odo_root["std"].as<std::vector<double>>();
+        if (vec.size() == 3) odo_std_def = Vector3d(vec.data());
+    }
+    if (odo_root && odo_root["srw"]) {
+        odo_srw_def = odo_root["srw"].as<double>() * 1e-6;
+    }
+    parameters->odo_std = odo_std_def;
+    parameters->odo_srw = odo_srw_def;
     parameters->lodo    = odolever;
     parameters->abv     = bodyangle;
 
     // Parse odometer sources: support legacy `odometer` and per-wheel `odometer_left/right`
-    YAML::Node odo_cfg = config["odometer"];
+    YAML::Node odo_cfg = odo_root; // may be null if odometer block absent
     std::vector<OdoSource> odo_sources;
     auto load_odo_node = [&](const YAML::Node &node, const std::string &tag) {
         OdoSource src;
@@ -232,7 +245,7 @@ int main(int argc, char *argv[]) {
     bool use_nhc                  = true;
     double nhc_sigma              = 0.1;  // m/s
     double nhc_huber_delta        = 0.5;
-    if (odo_cfg["factor"]) {
+    if (odo_cfg && odo_cfg["factor"]) {
         auto f = odo_cfg["factor"];
         if (f["huber_delta"])          odo_huber_delta      = f["huber_delta"].as<double>();
         if (f["low_speed_thresh"])     odo_low_speed_thresh = f["low_speed_thresh"].as<double>();
