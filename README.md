@@ -157,6 +157,21 @@ This produces both summary metrics (RMSE, max) and a CSV with columns:
 ```
 time,dx,dy,dz,horiz,err3d
 ```
+
+## 7 Odometer Input (Standalone Only)
+
+- IMU-embedded ODO deprecated: feeding wheel/odometer measurements via extra
+  columns in the IMU file (8/9 columns) is no longer supported by the loader.
+  Keep IMU increments as 7 columns: `time dθx dθy dθz dvx dvy dvz` and set
+  `imudatalen: 7`.
+- Use standalone ODO files instead:
+  - Single file: configure under `odometer.file` with `columns: 2` (time, v) and
+    enable `odometer.isuseodo: true`.
+  - Left/right files: use `odometer_left` and/or `odometer_right` blocks with
+    `file`, `columns`, `lever`, `odoangle`, and `isuseodo: true`.
+- NHC (non-holonomic constraints) remains configurable in YAML under
+  `odometer.factor.use_nhc`.
+
 ```
 
 ## 3 Datasets

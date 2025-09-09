@@ -53,13 +53,8 @@ public:
         } else {
             imu_.dt = dt_;
         }
-
-        // 增量形式
-        if (columns_ == 8) {
-            imu_.odovel = data_[7] * imu_.dt;
-        } else if (columns_ == 9) {
-            imu_.odovel = 0.5 * (data_[7] + data_[8]) * imu_.dt;
-        }
+        // 不再从 IMU 文件读取里程计量，保持为 0。独立 ODO 请使用 OdoFileLoader。
+        imu_.odovel = 0.0;
 
         return imu_;
     }

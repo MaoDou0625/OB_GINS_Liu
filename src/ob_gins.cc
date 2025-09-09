@@ -808,13 +808,11 @@ void imuInterpolation(const IMU &imu01, IMU &imu00, IMU &imu11, double mid) {
     imu00.dt     = buff.dt - (buff.time - time);
     imu00.dtheta = buff.dtheta * (1 - scale);
     imu00.dvel   = buff.dvel * (1 - scale);
-    imu00.odovel = buff.odovel * (1 - scale);
 
     imu11.time   = buff.time;
     imu11.dt     = buff.time - time;
     imu11.dtheta = buff.dtheta * scale;
     imu11.dvel   = buff.dvel * scale;
-    imu11.odovel = buff.odovel * scale;
 }
 
 int isNeedInterpolation(const IMU &imu0, const IMU &imu1, double mid) {
