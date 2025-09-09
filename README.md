@@ -172,6 +172,35 @@ time,dx,dy,dz,horiz,err3d
 - NHC (non-holonomic constraints) remains configurable in YAML under
   `odometer.factor.use_nhc`.
 
+## 8 Car Data Preparation (step-by-step)
+
+The repository includes helper scripts to convert Wheel‑INS car datasets into
+OB_GINS‑ready inputs under `dataset/car/`.
+
+Step 1 — IMU rates → increments, GNSS POS, 200 Hz truth (full span):
+
+```
+python tools/prepare_car_full_from_wheelins.py
+```
+
+This generates:
+- `dataset/car/Body-IMU/C1_imu_increments.txt` (7 cols increments, full span)
+- `dataset/car/Ground Truth/GINS_all.pos` (1 Hz POS, full span)
+- `dataset/car/Ground Truth/truth_200hz.nav` (expanded from GINS.bin)
+
+Step 2 — Left/Right ODO (full span):
+
+```
+python tools/prepare_car_odo_full.py
+```
+
+This generates:
+- `dataset/car/Odometer/odo_left.txt`  (time v)
+- `dataset/car/Odometer/odo_right.txt` (time v)
+
+You can then point a YAML (e.g. `config/run_car_30s_no_odo.yaml`) to these
+paths and set your desired time window via `starttime/endtime`.
+
 ```
 
 ## 3 Datasets
