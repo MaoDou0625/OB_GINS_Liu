@@ -36,6 +36,18 @@ odometer_right:
   lever: [ -0.64, -0.628, 2.122 ]
   odoangle: [ 0, -0.30, -1.09 ]
 
+# Differential yaw-rate factor (from left/right wheel speeds)
+diff_yaw:
+  enable: true
+  baseline_m: 1.5         # rear axle baseline (meters)
+  sigma_radps: 0.05       # nominal std of dyaw (rad/s)
+  huber_delta: 1.0
+  pair_tolerance_s: 0.01  # max time gap to pair L/R (seconds)
+  use_shared_odo_gates: true  # reuse yaw_rate/acc gates (for scaling/gating)
+  hard_gate: true             # skip Δω residual under extreme yaw/acc
+  max_yaw_rate_radps: 1.0     # if not using shared gates
+  max_accel_ms2: 5.0          # if not using shared gates
+
 imumodel:
   arw: 0.1
   vrw: 0.1

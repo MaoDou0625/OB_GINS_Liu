@@ -35,6 +35,7 @@
 #include "src/factors/angles_prior_factor.h"
 #include "src/factors/sodo_prior_factor.h"
 #include "src/factors/nhc_factor.h"
+#include "src/factors/diff_yaw_factor.h"
 #include "src/preintegration/imu_error_factor.h"
 #include "src/preintegration/preintegration.h"
 #include "src/preintegration/preintegration_factor.h"
@@ -259,6 +260,29 @@ int main(int argc, char *argv[]) {
         if (f["use_nhc"])              use_nhc              = f["use_nhc"].as<bool>();
         if (f["nhc_sigma"])            nhc_sigma            = f["nhc_sigma"].as<double>();
         if (f["nhc_huber_delta"])      nhc_huber_delta      = f["nhc_huber_delta"].as<double>();
+    }
+
+    // Differential yaw-rate (Δω) factor configuration
+    YAML::Node diffyaw_cfg          = config["diff_yaw"];
+    bool use_diffyaw                = false;
+    double diffyaw_baseline         = 1.5;   // axle baseline [m]
+    double diffyaw_sigma            = 0.05;  // rad/s
+    double diffyaw_huber_delta      = 1.0;
+    double diffyaw_pair_tolerance_s = 0.01;  // pair tolerance between L/R time tags
+    bool   diffyaw_use_shared_gates = true;  // reuse odo yaw/acc gating to scale sigma / thresholds
+    bool   diffyaw_hard_gate        = false; // skip residual when exceeding thresholds
+    double diffyaw_gate_yaw         = 1.0;   // rad/s (used if not using shared gates)
+    double diffyaw_gate_acc         = 5.0;   // m/s^2 (used if not using shared gates)
+    if (diffyaw_cfg) {
+        if (diffyaw_cfg["enable"])           use_diffyaw                = diffyaw_cfg["enable"].as<bool>();
+        if (diffyaw_cfg["baseline_m"])       diffyaw_baseline           = diffyaw_cfg["baseline_m"].as<double>();
+        if (diffyaw_cfg["sigma_radps"])      diffyaw_sigma              = diffyaw_cfg["sigma_radps"].as<double>();
+        if (diffyaw_cfg["huber_delta"])      diffyaw_huber_delta        = diffyaw_cfg["huber_delta"].as<double>();
+        if (diffyaw_cfg["pair_tolerance_s"]) diffyaw_pair_tolerance_s   = diffyaw_cfg["pair_tolerance_s"].as<double>();
+        if (diffyaw_cfg["use_shared_odo_gates"]) diffyaw_use_shared_gates = diffyaw_cfg["use_shared_odo_gates"].as<bool>();
+        if (diffyaw_cfg["hard_gate"])         diffyaw_hard_gate          = diffyaw_cfg["hard_gate"].as<bool>();
+        if (diffyaw_cfg["max_yaw_rate_radps"]) diffyaw_gate_yaw          = diffyaw_cfg["max_yaw_rate_radps"].as<double>();
+        if (diffyaw_cfg["max_accel_ms2"])      diffyaw_gate_acc          = diffyaw_cfg["max_accel_ms2"].as<double>();
     }
 
     // GNSS浠跨湡涓柇閰嶇疆
@@ -552,6 +576,85 @@ int main(int argc, char *argv[]) {
                                                          statedatalist[nearest].mix,
                                                          &sodo_param,
                                                          rbw_param);
+                            }
+                        }
+
+                        // Differential yaw-rate residuals (need both left/right wheel speeds)
+                        if (use_diffyaw) {
+                            ceres::LossFunction *dy_loss = new ceres::HuberLoss(diffyaw_huber_delta);
+                            // Find left/right sources
+                            OdoSource *left_src = nullptr; OdoSource *right_src = nullptr;
+                            for (auto &s : odo_sources) {
+                                if (!s.loader) continue;
+                                if (s.name == "left") left_src = &s;
+                                if (s.name == "right") right_src = &s;
+                            }
+                            if (left_src && right_src) {
+                                // Two-pointer pairing within tolerance
+                                size_t li = 0, ri = 0;
+                                const auto &LB = left_src->buffer;
+                                const auto &RB = right_src->buffer;
+                                while (li < LB.size() && ri < RB.size()) {
+                                    double tl = LB[li].time, tr = RB[ri].time;
+                                    if (tl < timelist.front() - MINIMUM_INTERVAL) { ++li; continue; }
+                                    if (tr < timelist.front() - MINIMUM_INTERVAL) { ++ri; continue; }
+                                    if (tl > timelist.back() + MINIMUM_INTERVAL || tr > timelist.back() + MINIMUM_INTERVAL) break;
+
+                                    double dt_pair = fabs(tl - tr);
+                                    if (dt_pair <= diffyaw_pair_tolerance_s) {
+                                        const double t = 0.5 * (tl + tr);
+                                        const double vL = LB[li].vel;
+                                        const double vR = RB[ri].vel;
+                                        const double omega_wheel = (vL - vR) / std::max(diffyaw_baseline, 1e-6);
+
+                                        // Find nearest graph node
+                                        size_t nearest = 0; double best = 1e9;
+                                        for (size_t i = 0; i < timelist.size(); ++i) {
+                                            double d = fabs(t - timelist[i]);
+                                            if (d < best) { best = d; nearest = i; }
+                                        }
+                                        // Estimate omega_z and accel magnitude at time t
+                                        Vector3d omega_b = Vector3d::Zero();
+                                        Vector3d acc_b   = Vector3d::Zero();
+                                        for (size_t ii = 1; ii < imuqueue.size(); ++ii) {
+                                            if (imuqueue[ii - 1].time <= t && imuqueue[ii].time >= t) {
+                                                double dt  = std::max(imuqueue[ii].dt, 1e-6);
+                                                omega_b    = imuqueue[ii].dtheta / dt;
+                                                acc_b      = imuqueue[ii].dvel / dt;
+                                                break;
+                                            }
+                                        }
+                                        if (omega_b.isZero(0)) {
+                                            omega_b = (omega_nodes.size() > nearest) ? omega_nodes[nearest] : Vector3d::Zero();
+                                        }
+
+                                        // Hard gate or adaptive scaling
+                                        const double abs_yaw = fabs(omega_b.z());
+                                        const double accmag  = acc_b.norm();
+                                        double sigma = diffyaw_sigma;
+                                        if (diffyaw_hard_gate) {
+                                            double yaw_thr = diffyaw_use_shared_gates ? odo_yaw_rate_thresh : diffyaw_gate_yaw;
+                                            double acc_thr = diffyaw_use_shared_gates ? odo_accel_thresh     : diffyaw_gate_acc;
+                                            if (abs_yaw > yaw_thr || accmag > acc_thr) {
+                                                // skip this residual
+                                                ++li; ++ri;
+                                                continue;
+                                            }
+                                        } else if (diffyaw_use_shared_gates) {
+                                            if (abs_yaw > odo_yaw_rate_thresh) sigma *= odo_yaw_rate_scale;
+                                            if (accmag  > odo_accel_thresh)    sigma *= odo_accel_scale;
+                                        }
+
+                                        auto dy = new DiffYawFactor(omega_b.z(), omega_wheel, sigma, mix_dim);
+                                        problem.AddResidualBlock(dy, dy_loss, statedatalist[nearest].mix);
+
+                                        ++li; ++ri;
+                                    } else if (tl < tr) {
+                                        ++li;
+                                    } else {
+                                        ++ri;
+                                    }
+                                }
                             }
                         }
                     }
