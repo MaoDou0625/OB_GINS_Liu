@@ -94,6 +94,113 @@ cd ~/OB_GINS
 ./bin/ob_gins ./dataset/ob_gins.yaml
 
 # Wait until the program finish
+
+## 2.1 Windows (MSVC + vcpkg) quick build
+
+We provide a helper script for MSVC + vcpkg users:
+
+```
+build_ob_gins_win.bat
+```
+
+Defaults assume MSVC 2022 at `D:\VisualStudio\2022` and vcpkg at `D:\vcpkgforOB\vcpkg`. Adjust paths inside the script if needed.
+
+Run it from the repo root to configure and build OB_GINS with vcpkg toolchain.
+
+## 2.2 One‑click run + evaluate (example)
+
+We also include convenience scripts to run a 30 s example (ADIS + GNSS) and evaluate against truth:
+
+```
+Batch:      tools\run_liu_30s_and_eval.bat [--vs "<vcvars64.bat>"] [--toolchain "<vcpkg cmake toolchain>"] [--yaml <config.yaml>] [--nav <nav_out>] [--truth <truth.nav>] [--out <csv>]
+PowerShell: powershell -ExecutionPolicy Bypass -File tools\run_liu_30s_and_eval.ps1 -vs "<vcvars64.bat>" -toolchain "<vcpkg cmake toolchain>" -yaml <config.yaml> -nav <nav_out> -truth <truth.nav> -out <csv>
+```
+
+It will:
+- Build OB_GINS (via MSVC + vcpkg)
+- Run `config/run_liu_30s_no_odo.yaml`
+- Compare the navigation result against `dataset/truth.nav` at 200 Hz
+- Save per‑sample errors to `out/liu_30s_no_odo/nav_vs_truth_200hz.csv`
+  You can override VS/vcpkg paths with flags, e.g.:
+
+```
+tools\run_liu_30s_and_eval.bat --vs "C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Auxiliary\\Build\\vcvars64.bat" ^
+  --toolchain "C:/vcpkg/scripts/buildsystems/vcpkg.cmake"
+```
+
+## 6 Evaluation
+
+### 6.1 Compare against GNSS (1 Hz)
+
+Use the provided script to align nav at integer seconds and compute RMSE vs GNSS:
+
+```
+python tools/compare_nav_gnss.py <nav1> <nav2> <gnss>
+```
+
+### 6.2 Compare against 200 Hz truth via interpolation
+
+Use the 200 Hz comparator to interpolate nav onto truth timestamps and compute errors per sample:
+
+```
+python tools/compare_nav_truth_200hz.py <nav_path> <truth_path> --out <out_csv>
+
+# example
+python tools/compare_nav_truth_200hz.py \
+  out/liu_30s_no_odo/OB_GINS_TXT.nav \
+  dataset/truth.nav \
+  --out out/liu_30s_no_odo/nav_vs_truth_200hz.csv
+```
+
+This produces both summary metrics (RMSE, max) and a CSV with columns:
+
+```
+time,dx,dy,dz,horiz,err3d
+```
+
+## 7 Odometer Input (Standalone Only)
+
+- IMU-embedded ODO deprecated: feeding wheel/odometer measurements via extra
+  columns in the IMU file (8/9 columns) is no longer supported by the loader.
+  Keep IMU increments as 7 columns: `time dθx dθy dθz dvx dvy dvz` and set
+  `imudatalen: 7`.
+- Use standalone ODO files instead:
+  - Single file: configure under `odometer.file` with `columns: 2` (time, v) and
+    enable `odometer.isuseodo: true`.
+  - Left/right files: use `odometer_left` and/or `odometer_right` blocks with
+    `file`, `columns`, `lever`, `odoangle`, and `isuseodo: true`.
+- NHC (non-holonomic constraints) remains configurable in YAML under
+  `odometer.factor.use_nhc`.
+
+## 8 Car Data Preparation (step-by-step)
+
+The repository includes helper scripts to convert Wheel‑INS car datasets into
+OB_GINS‑ready inputs under `dataset/car/`.
+
+Step 1 — IMU rates → increments, GNSS POS, 200 Hz truth (full span):
+
+```
+python tools/prepare_car_full_from_wheelins.py
+```
+
+This generates:
+- `dataset/car/Body-IMU/C1_imu_increments.txt` (7 cols increments, full span)
+- `dataset/car/Ground Truth/GINS_all.pos` (1 Hz POS, full span)
+- `dataset/car/Ground Truth/truth_200hz.nav` (expanded from GINS.bin)
+
+Step 2 — Left/Right ODO (full span):
+
+```
+python tools/prepare_car_odo_full.py
+```
+
+This generates:
+- `dataset/car/Odometer/odo_left.txt`  (time v)
+- `dataset/car/Odometer/odo_right.txt` (time v)
+
+You can then point a YAML (e.g. `config/run_car_30s_no_odo.yaml`) to these
+paths and set your desired time window via `starttime/endtime`.
+
 ```
 
 ## 3 Datasets

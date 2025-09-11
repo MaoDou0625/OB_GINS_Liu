@@ -1,0 +1,66 @@
+﻿imufile: "D:/Code/OB_GINS/dataset/car/Body-IMU/C1_imu_increments.txt"
+gnssfile: "D:/Code/OB_GINS/dataset/car/Ground Truth/GINS_all.pos"
+outputpath: "D:/Code/OB_GINS/out/car_30s_odo"
+
+windows: 30
+starttime: 353650
+endtime: 353680   # 30s
+
+num_iterations: 20
+is_outlier_culling: false
+
+initvel: [ 0, 0, 0 ]
+initatt: [ 0, 0, 276 ]
+initgb: [ 0, 0, 0 ]
+initab: [ 0, 0, 0 ]
+
+imudatalen: 7
+imudatarate: 200
+isearth: true
+
+antlever: [ -0.073, 0.302, 0.087 ]
+odolever: [ -0.64, -0.628, 2.122 ]
+bodyangle: [ 0, -0.30, -1.09 ]
+
+odometer_left:
+  isuseodo: true
+  file: "D:/Code/OB_GINS/dataset/car/Odometer/odo_left.txt"
+  columns: 2
+  lever: [ -0.64, -0.628, 2.122 ]
+  odoangle: [ 0, -0.30, -1.09 ]
+
+odometer_right:
+  isuseodo: true
+  file: "D:/Code/OB_GINS/dataset/car/Odometer/odo_wheelimu.txt"
+  columns: 2
+  lever: [ -0.64, -0.628, 2.122 ]
+  odoangle: [ 0, -0.30, -1.09 ]
+
+# Differential yaw-rate factor (from left/right wheel speeds)
+diff_yaw:
+  enable: true
+  baseline_m: 1.5         # rear axle baseline (meters)
+  sigma_radps: 0.05       # nominal std of dyaw (rad/s)
+  huber_delta: 1.0
+  pair_tolerance_s: 0.01  # max time gap to pair L/R (seconds)
+  use_shared_odo_gates: true  # reuse yaw_rate/acc gates (for scaling/gating)
+  hard_gate: true             # skip Δω residual under extreme yaw/acc
+  max_yaw_rate_radps: 1.0     # if not using shared gates
+  max_accel_ms2: 5.0          # if not using shared gates
+
+imumodel:
+  arw: 0.1
+  vrw: 0.1
+  gbstd: 25.0
+  abstd: 200.0
+  corrtime: 1.0
+
+isuseoutage: false
+outagetime: 0
+outagelen: 0
+outageperiod: 0
+
+gnssthreshold: 0.2
+
+
+

@@ -35,6 +35,7 @@
 #include "src/factors/angles_prior_factor.h"
 #include "src/factors/sodo_prior_factor.h"
 #include "src/factors/nhc_factor.h"
+#include "src/factors/diff_yaw_factor.h"
 #include "src/preintegration/imu_error_factor.h"
 #include "src/preintegration/preintegration.h"
 #include "src/preintegration/preintegration_factor.h"
@@ -43,6 +44,8 @@
 #include <absl/time/clock.h>
 #include <deque>
 #include <iomanip>
+#include <cmath>
+#include <memory>
 #include <yaml-cpp/yaml.h>
 
 #define INTEGRATION_LENGTH 1.0
@@ -53,6 +56,17 @@ void imuInterpolation(const IMU &imu01, IMU &imu00, IMU &imu11, double mid);
 
 void writeNavResult(double time, const Vector3d &origin, const IntegrationState &state, FileSaver &navfile,
                     FileSaver &errfile);
+
+// Helper container for optional left/right odometer streams
+struct OdoSource {
+    std::string name;
+    std::unique_ptr<OdoFileLoader> loader;   // may be null if disabled
+    std::deque<ODO> buffer;                  // measurements within window
+    ODO curr{};                              // latest read sample
+    Vector3d lever = Vector3d::Zero();       // lever arm (m)
+    Vector3d base_angle = Vector3d::Zero();  // odo mounting angles (deg in YAML -> rad here)
+    bool enabled = false;
+};
 
 int main(int argc, char *argv[]) {
 
@@ -145,37 +159,78 @@ int main(int argc, char *argv[]) {
     parameters->acc_bias_std = config["imumodel"]["abstd"].as<double>() * 1.0e-5;
     parameters->corr_time    = config["imumodel"]["corrtime"].as<double>() * 3600;
 
-    bool isuseodo       = config["odometer"]["isuseodo"].as<bool>();
-    vec                 = config["odometer"]["std"].as<std::vector<double>>();
-    parameters->odo_std = Vector3d(vec.data());
-    parameters->odo_srw = config["odometer"]["srw"].as<double>() * 1e-6;
+    // Odometer base options (optional block). Provide safe defaults if missing.
+    YAML::Node odo_root  = config["odometer"];
+    bool isuseodo        = false;
+    Vector3d odo_std_def(0.05, 0.05, 0.05);
+    double odo_srw_def   = 100.0 * 1e-6; // 100 ppm
+    if (odo_root && odo_root["isuseodo"]) {
+        isuseodo = odo_root["isuseodo"].as<bool>();
+    }
+    if (odo_root && odo_root["std"]) {
+        vec = odo_root["std"].as<std::vector<double>>();
+        if (vec.size() == 3) odo_std_def = Vector3d(vec.data());
+    }
+    if (odo_root && odo_root["srw"]) {
+        odo_srw_def = odo_root["srw"].as<double>() * 1e-6;
+    }
+    parameters->odo_std = odo_std_def;
+    parameters->odo_srw = odo_srw_def;
     parameters->lodo    = odolever;
     parameters->abv     = bodyangle;
 
-    // Standalone ODO file (optional; required if isuseodo is true)
-    OdoFileLoader *odofile_ptr = nullptr;
-    YAML::Node odo_cfg         = config["odometer"];
+    // Parse odometer sources: support legacy `odometer` and per-wheel `odometer_left/right`
+    YAML::Node odo_cfg = odo_root; // may be null if odometer block absent
+    std::vector<OdoSource> odo_sources;
+    auto load_odo_node = [&](const YAML::Node &node, const std::string &tag) {
+        OdoSource src;
+        src.name = tag;
+        if (!node || !node["isuseodo"] || !node["isuseodo"].as<bool>()) {
+            src.enabled = false;
+            return src;
+        }
+        if (!node["file"]) {
+            std::cout << "Odometer(" << tag << ") enabled but no file specified in config" << std::endl;
+            return src;
+        }
+        std::string path = node["file"].as<std::string>();
+        int cols         = node["columns"] ? node["columns"].as<int>() : 2;
+        src.loader       = std::make_unique<OdoFileLoader>(path, cols);
+        if (!src.loader->isOpen()) {
+            std::cout << "Failed to open odometer file: " << path << std::endl;
+            src.loader.reset();
+            return src;
+        }
+        // lever (fallback to odolever)
+        src.lever = odolever;
+        if (node["lever"]) {
+            auto lv = node["lever"].as<std::vector<double>>();
+            if (lv.size() == 3) src.lever = Vector3d(lv.data());
+        }
+        // odoangle (fallback to bodyangle)
+        src.base_angle = bodyangle;
+        if (node["odoangle"]) {
+            auto ang = node["odoangle"].as<std::vector<double>>();
+            if (ang.size() == 3) src.base_angle = Vector3d(ang.data()) * D2R;
+        }
+        src.enabled = true;
+        return src;
+    };
+    // Legacy single odometer
     if (isuseodo) {
-        if (!odo_cfg["file"]) {
-            std::cout << "Odometer enabled but no odometer.file specified in config" << std::endl;
-            return -1;
-        }
-        std::string odopath = odo_cfg["file"].as<std::string>();
-        int odocolumns      = odo_cfg["columns"] ? odo_cfg["columns"].as<int>() : 2;
-        odofile_ptr         = new OdoFileLoader(odopath, odocolumns);
-        if (!odofile_ptr->isOpen()) {
-            std::cout << "Failed to open odometer file" << std::endl;
-            return -1;
-        }
-        // Optional overrides for ODO installation parameters (position/orientation)
-        // lever in meters, odoangle in degrees
-        if (odo_cfg["lever"]) {
-            auto lv = odo_cfg["lever"].as<std::vector<double>>();
-            if (lv.size() == 3) {
-                parameters->lodo = Vector3d(lv.data());
-            }
-        }
+        auto src = load_odo_node(odo_cfg, "odometer");
+        if (src.enabled) odo_sources.push_back(std::move(src));
     }
+    // Per-wheel nodes (optional)
+    if (config["odometer_left"]) {
+        auto src = load_odo_node(config["odometer_left"], "left");
+        if (src.enabled) odo_sources.push_back(std::move(src));
+    }
+    if (config["odometer_right"]) {
+        auto src = load_odo_node(config["odometer_right"], "right");
+        if (src.enabled) odo_sources.push_back(std::move(src));
+    }
+    bool has_odo_sources = !odo_sources.empty();
 
     // ODO factor configuration (robust loss, adaptive thresholds, priors)
     double odo_huber_delta        = 1.0;
@@ -191,7 +246,7 @@ int main(int argc, char *argv[]) {
     bool use_nhc                  = true;
     double nhc_sigma              = 0.1;  // m/s
     double nhc_huber_delta        = 0.5;
-    if (odo_cfg["factor"]) {
+    if (odo_cfg && odo_cfg["factor"]) {
         auto f = odo_cfg["factor"];
         if (f["huber_delta"])          odo_huber_delta      = f["huber_delta"].as<double>();
         if (f["low_speed_thresh"])     odo_low_speed_thresh = f["low_speed_thresh"].as<double>();
@@ -205,6 +260,29 @@ int main(int argc, char *argv[]) {
         if (f["use_nhc"])              use_nhc              = f["use_nhc"].as<bool>();
         if (f["nhc_sigma"])            nhc_sigma            = f["nhc_sigma"].as<double>();
         if (f["nhc_huber_delta"])      nhc_huber_delta      = f["nhc_huber_delta"].as<double>();
+    }
+
+    // Differential yaw-rate (Δω) factor configuration
+    YAML::Node diffyaw_cfg          = config["diff_yaw"];
+    bool use_diffyaw                = false;
+    double diffyaw_baseline         = 1.5;   // axle baseline [m]
+    double diffyaw_sigma            = 0.05;  // rad/s
+    double diffyaw_huber_delta      = 1.0;
+    double diffyaw_pair_tolerance_s = 0.01;  // pair tolerance between L/R time tags
+    bool   diffyaw_use_shared_gates = true;  // reuse odo yaw/acc gating to scale sigma / thresholds
+    bool   diffyaw_hard_gate        = false; // skip residual when exceeding thresholds
+    double diffyaw_gate_yaw         = 1.0;   // rad/s (used if not using shared gates)
+    double diffyaw_gate_acc         = 5.0;   // m/s^2 (used if not using shared gates)
+    if (diffyaw_cfg) {
+        if (diffyaw_cfg["enable"])           use_diffyaw                = diffyaw_cfg["enable"].as<bool>();
+        if (diffyaw_cfg["baseline_m"])       diffyaw_baseline           = diffyaw_cfg["baseline_m"].as<double>();
+        if (diffyaw_cfg["sigma_radps"])      diffyaw_sigma              = diffyaw_cfg["sigma_radps"].as<double>();
+        if (diffyaw_cfg["huber_delta"])      diffyaw_huber_delta        = diffyaw_cfg["huber_delta"].as<double>();
+        if (diffyaw_cfg["pair_tolerance_s"]) diffyaw_pair_tolerance_s   = diffyaw_cfg["pair_tolerance_s"].as<double>();
+        if (diffyaw_cfg["use_shared_odo_gates"]) diffyaw_use_shared_gates = diffyaw_cfg["use_shared_odo_gates"].as<bool>();
+        if (diffyaw_cfg["hard_gate"])         diffyaw_hard_gate          = diffyaw_cfg["hard_gate"].as<bool>();
+        if (diffyaw_cfg["max_yaw_rate_radps"]) diffyaw_gate_yaw          = diffyaw_cfg["max_yaw_rate_radps"].as<double>();
+        if (diffyaw_cfg["max_accel_ms2"])      diffyaw_gate_acc          = diffyaw_cfg["max_accel_ms2"].as<double>();
     }
 
     // GNSS浠跨湡涓柇閰嶇疆
@@ -231,11 +309,13 @@ int main(int argc, char *argv[]) {
 
     // Align ODO stream to start time
     std::deque<ODO> odolist;
-    ODO odo;
-    if (isuseodo) {
-        odo = odofile_ptr->next();
-        while (odo.time < starttime && !odofile_ptr->isEof()) {
-            odo = odofile_ptr->next();
+    if (has_odo_sources) {
+        for (auto &src : odo_sources) {
+            if (!src.loader) continue;
+            src.curr = src.loader->next();
+            while (src.curr.time < starttime && !src.loader->isEof()) {
+                src.curr = src.loader->next();
+            }
         }
     }
 
@@ -310,6 +390,8 @@ int main(int argc, char *argv[]) {
         while (!imuqueue.empty() && imuqueue.front().time < timelist.front() - 2.0 * INTEGRATION_LENGTH) {
             imuqueue.pop_front();
         }
+
+        // No additional high-rate write here; nodes are now at INTEGRATION_LENGTH (e.g., 0.01s)
 
         imu_pre = imu_cur;
         imu_cur = imufile.next();
@@ -429,86 +511,152 @@ int main(int argc, char *argv[]) {
                     problem.AddResidualBlock(factor, nullptr, statedatalist[preintegrationlist.size()].mix);
                 }
 
-                // Add wheel-speed (odometer) factors as a separate measurement stream
-                if (isuseodo) {
+                // Add wheel-speed (odometer) factors as separate measurement streams
+                if (has_odo_sources) {
                     // Advance ODO buffer up to the latest node time
-                    while (odofile_ptr && !odofile_ptr->isEof() && odo.time <= *timelist.rbegin()) {
-                        odolist.push_back(odo);
-                        odo = odofile_ptr->next();
-                    }
+                    {
+                        // Add shared parameters (scale and rbw) once
+                        const int mix_dim = Preintegration::numMixParameter(preintegration_options);
+                        ceres::LossFunction *odo_loss = new ceres::HuberLoss(odo_huber_delta);
 
-                    // Remove outdated ODO measurements beyond the window
-                    while (!odolist.empty() && odolist.front().time < timelist.front() - 0.5 * INTEGRATION_LENGTH) {
-                        odolist.pop_front();
-                    }
+                        static double sodo_param = 1.0; // global scale across sources
+                        problem.AddParameterBlock(&sodo_param, 1);
+                        problem.AddResidualBlock(new SodoPriorFactor(1.0, sodo_prior_sigma), nullptr, &sodo_param);
 
-                    // Add ODO residuals by mapping to the nearest node
-                    const int mix_dim   = Preintegration::numMixParameter(preintegration_options);
-                    const Vector3d lodo = parameters->lodo;                               // lever arm (body)
-                    ceres::LossFunction *odo_loss = new ceres::HuberLoss(odo_huber_delta);
+                        static double rbw_param[3] = {0.0, 0.0, 0.0};
+                        problem.AddParameterBlock(rbw_param, 3);
+                        problem.AddResidualBlock(new AnglesPriorFactor(rbw_prior_sigma_rad), nullptr, rbw_param);
 
-                    static double sodo_param = 1.0; // global scale
-                    problem.AddParameterBlock(&sodo_param, 1);
-                    problem.AddResidualBlock(new SodoPriorFactor(1.0, sodo_prior_sigma), nullptr, &sodo_param);
+                        for (auto &src : odo_sources) {
+                            if (!src.loader) continue;
+                            // Read forward to the latest node time
+                            while (!src.loader->isEof() && src.curr.time <= *timelist.rbegin()) {
+                                src.buffer.push_back(src.curr);
+                                src.curr = src.loader->next();
+                            }
+                            // Drop outdated
+                            while (!src.buffer.empty() && src.buffer.front().time < timelist.front() - 0.5 * INTEGRATION_LENGTH) {
+                                src.buffer.pop_front();
+                            }
+                            // Build residuals for this source
+                            for (const auto &m : src.buffer) {
+                                if (m.time < timelist.front() - MINIMUM_INTERVAL || m.time > timelist.back() + MINIMUM_INTERVAL) {
+                                    continue;
+                                }
+                                // Find nearest node index
+                                size_t nearest = 0; double best = 1e9;
+                                for (size_t i = 0; i < timelist.size(); ++i) {
+                                    double d = fabs(m.time - timelist[i]);
+                                    if (d < best) { best = d; nearest = i; }
+                                }
+                                // Approximate omega/acc at measurement time
+                                Vector3d omega_b = Vector3d::Zero();
+                                Vector3d acc_b   = Vector3d::Zero();
+                                for (size_t ii = 1; ii < imuqueue.size(); ++ii) {
+                                    if (imuqueue[ii - 1].time <= m.time && imuqueue[ii].time >= m.time) {
+                                        double dt  = std::max(imuqueue[ii].dt, 1e-6);
+                                        omega_b    = imuqueue[ii].dtheta / dt;
+                                        acc_b      = imuqueue[ii].dvel / dt;
+                                        break;
+                                    }
+                                }
+                                if (omega_b.isZero(0)) {
+                                    omega_b = (omega_nodes.size() > nearest) ? omega_nodes[nearest] : Vector3d::Zero();
+                                }
+                                // Adaptive sigma
+                                double sigma = parameters->odo_std[0];
+                                if (fabs(m.vel) < odo_low_speed_thresh) sigma *= odo_low_speed_scale;
+                                if (fabs(omega_b.z()) > odo_yaw_rate_thresh) sigma *= odo_yaw_rate_scale;
+                                if (acc_b.norm() > odo_accel_thresh) sigma *= odo_accel_scale;
 
-                    // Global calibration for R_b^v as delta angles (roll,pitch,yaw) around config bodyangle
-                    static double rbw_param[3] = {0.0, 0.0, 0.0};
-                    problem.AddParameterBlock(rbw_param, 3);
-                    problem.AddResidualBlock(new AnglesPriorFactor(rbw_prior_sigma_rad), nullptr, rbw_param);
-
-                    for (const auto &m : odolist) {
-                        if (m.time < timelist.front() - MINIMUM_INTERVAL || m.time > timelist.back() + MINIMUM_INTERVAL) {
-                            continue;
-                        }
-
-                        size_t nearest = 0;
-                        double best    = 1e9;
-                        for (size_t i = 0; i < timelist.size(); ++i) {
-                            double d = fabs(m.time - timelist[i]);
-                            if (d < best) {
-                                best    = d;
-                                nearest = i;
+                                Vector3d omega_x_l = omega_b.cross(src.lever);
+                                auto factor        = new OdoFactor(m.vel, sigma, omega_x_l, mix_dim, src.base_angle);
+                                problem.AddResidualBlock(factor, odo_loss,
+                                                         statedatalist[nearest].pose,
+                                                         statedatalist[nearest].mix,
+                                                         &sodo_param,
+                                                         rbw_param);
                             }
                         }
 
-                        // Extract more precise omega and acc near this measurement time
-                        Vector3d omega_b = Vector3d::Zero();
-                        Vector3d acc_b   = Vector3d::Zero();
-                        for (size_t ii = 1; ii < imuqueue.size(); ++ii) {
-                            if (imuqueue[ii - 1].time <= m.time && imuqueue[ii].time >= m.time) {
-                                double dt  = std::max(imuqueue[ii].dt, 1e-6);
-                                omega_b    = imuqueue[ii].dtheta / dt;
-                                acc_b      = imuqueue[ii].dvel / dt;
-                                break;
+                        // Differential yaw-rate residuals (need both left/right wheel speeds)
+                        if (use_diffyaw) {
+                            ceres::LossFunction *dy_loss = new ceres::HuberLoss(diffyaw_huber_delta);
+                            // Find left/right sources
+                            OdoSource *left_src = nullptr; OdoSource *right_src = nullptr;
+                            for (auto &s : odo_sources) {
+                                if (!s.loader) continue;
+                                if (s.name == "left") left_src = &s;
+                                if (s.name == "right") right_src = &s;
+                            }
+                            if (left_src && right_src) {
+                                // Two-pointer pairing within tolerance
+                                size_t li = 0, ri = 0;
+                                const auto &LB = left_src->buffer;
+                                const auto &RB = right_src->buffer;
+                                while (li < LB.size() && ri < RB.size()) {
+                                    double tl = LB[li].time, tr = RB[ri].time;
+                                    if (tl < timelist.front() - MINIMUM_INTERVAL) { ++li; continue; }
+                                    if (tr < timelist.front() - MINIMUM_INTERVAL) { ++ri; continue; }
+                                    if (tl > timelist.back() + MINIMUM_INTERVAL || tr > timelist.back() + MINIMUM_INTERVAL) break;
+
+                                    double dt_pair = fabs(tl - tr);
+                                    if (dt_pair <= diffyaw_pair_tolerance_s) {
+                                        const double t = 0.5 * (tl + tr);
+                                        const double vL = LB[li].vel;
+                                        const double vR = RB[ri].vel;
+                                        const double omega_wheel = (vL - vR) / std::max(diffyaw_baseline, 1e-6);
+
+                                        // Find nearest graph node
+                                        size_t nearest = 0; double best = 1e9;
+                                        for (size_t i = 0; i < timelist.size(); ++i) {
+                                            double d = fabs(t - timelist[i]);
+                                            if (d < best) { best = d; nearest = i; }
+                                        }
+                                        // Estimate omega_z and accel magnitude at time t
+                                        Vector3d omega_b = Vector3d::Zero();
+                                        Vector3d acc_b   = Vector3d::Zero();
+                                        for (size_t ii = 1; ii < imuqueue.size(); ++ii) {
+                                            if (imuqueue[ii - 1].time <= t && imuqueue[ii].time >= t) {
+                                                double dt  = std::max(imuqueue[ii].dt, 1e-6);
+                                                omega_b    = imuqueue[ii].dtheta / dt;
+                                                acc_b      = imuqueue[ii].dvel / dt;
+                                                break;
+                                            }
+                                        }
+                                        if (omega_b.isZero(0)) {
+                                            omega_b = (omega_nodes.size() > nearest) ? omega_nodes[nearest] : Vector3d::Zero();
+                                        }
+
+                                        // Hard gate or adaptive scaling
+                                        const double abs_yaw = fabs(omega_b.z());
+                                        const double accmag  = acc_b.norm();
+                                        double sigma = diffyaw_sigma;
+                                        if (diffyaw_hard_gate) {
+                                            double yaw_thr = diffyaw_use_shared_gates ? odo_yaw_rate_thresh : diffyaw_gate_yaw;
+                                            double acc_thr = diffyaw_use_shared_gates ? odo_accel_thresh     : diffyaw_gate_acc;
+                                            if (abs_yaw > yaw_thr || accmag > acc_thr) {
+                                                // skip this residual
+                                                ++li; ++ri;
+                                                continue;
+                                            }
+                                        } else if (diffyaw_use_shared_gates) {
+                                            if (abs_yaw > odo_yaw_rate_thresh) sigma *= odo_yaw_rate_scale;
+                                            if (accmag  > odo_accel_thresh)    sigma *= odo_accel_scale;
+                                        }
+
+                                        auto dy = new DiffYawFactor(omega_b.z(), omega_wheel, sigma, mix_dim);
+                                        problem.AddResidualBlock(dy, dy_loss, statedatalist[nearest].mix);
+
+                                        ++li; ++ri;
+                                    } else if (tl < tr) {
+                                        ++li;
+                                    } else {
+                                        ++ri;
+                                    }
+                                }
                             }
                         }
-                        if (omega_b.isZero(0)) {
-                            // fallback to last at-nearest node
-                            omega_b = (omega_nodes.size() > nearest) ? omega_nodes[nearest] : Vector3d::Zero();
-                        }
-
-                        // Adaptive downweighting: low-speed, high yaw-rate, high acceleration
-                        double sigma = parameters->odo_std[0];
-                        if (fabs(m.vel) < odo_low_speed_thresh) sigma *= odo_low_speed_scale;         // near standstill
-                        if (fabs(omega_b.z()) > odo_yaw_rate_thresh) sigma *= odo_yaw_rate_scale;     // aggressive turn
-                        if (acc_b.norm() > odo_accel_thresh) sigma *= odo_accel_scale;                // harsh accel/brake
-
-                    // Use odoangle as base if provided; otherwise fallback to bodyangle
-                    Vector3d odo_base_angle = bodyangle;
-                    if (odo_cfg["odoangle"]) {
-                        auto ang = odo_cfg["odoangle"].as<std::vector<double>>();
-                        if (ang.size() == 3) {
-                            odo_base_angle = Vector3d(ang.data()) * D2R;
-                        }
-                    }
-
-                    Vector3d omega_x_l = omega_b.cross(lodo);
-                    auto factor        = new OdoFactor(m.vel, sigma, omega_x_l, mix_dim, odo_base_angle);
-                        problem.AddResidualBlock(factor, odo_loss,
-                                                 statedatalist[nearest].pose,
-                                                 statedatalist[nearest].mix,
-                                                 &sodo_param,
-                                                 rbw_param);
                     }
                 }
 
@@ -716,10 +864,6 @@ int main(int argc, char *argv[]) {
     errfile.close();
     imufile.close();
     gnssfile.close();
-    if (odofile_ptr) {
-        delete odofile_ptr;
-        odofile_ptr = nullptr;
-    }
 
     auto te = absl::Now();
     std::cout << std::endl << std::endl << "Cost " << absl::ToDoubleSeconds(te - ts) << " s in total" << std::endl;
@@ -780,13 +924,11 @@ void imuInterpolation(const IMU &imu01, IMU &imu00, IMU &imu11, double mid) {
     imu00.dt     = buff.dt - (buff.time - time);
     imu00.dtheta = buff.dtheta * (1 - scale);
     imu00.dvel   = buff.dvel * (1 - scale);
-    imu00.odovel = buff.odovel * (1 - scale);
 
     imu11.time   = buff.time;
     imu11.dt     = buff.time - time;
     imu11.dtheta = buff.dtheta * scale;
     imu11.dvel   = buff.dvel * scale;
-    imu11.odovel = buff.odovel * scale;
 }
 
 int isNeedInterpolation(const IMU &imu0, const IMU &imu1, double mid) {
