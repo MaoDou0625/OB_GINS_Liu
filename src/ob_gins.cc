@@ -36,6 +36,7 @@
 #include "src/factors/sodo_prior_factor.h"
 #include "src/factors/nhc_factor.h"
 #include "src/factors/diff_yaw_factor.h"
+#include "src/factors/scalar_prior_factor.h"
 #include "src/preintegration/imu_error_factor.h"
 #include "src/preintegration/preintegration.h"
 #include "src/preintegration/preintegration_factor.h"
@@ -232,6 +233,15 @@ int main(int argc, char *argv[]) {
     }
     bool has_odo_sources = !odo_sources.empty();
 
+    // Global gates override (unified yaw/acc thresholds/scales)
+    if (config["gates"]) {
+        auto g = config["gates"];
+        if (g["yaw_rate"]) {
+            auto y = g["yaw_rate"];
+            if (y["thr"])   {}
+            if (y["scale"]) {}
+        }
+    }
     // ODO factor configuration (robust loss, adaptive thresholds, priors)
     double odo_huber_delta        = 1.0;
     double odo_low_speed_thresh   = 0.2; // m/s
@@ -261,6 +271,20 @@ int main(int argc, char *argv[]) {
         if (f["nhc_sigma"])            nhc_sigma            = f["nhc_sigma"].as<double>();
         if (f["nhc_huber_delta"])      nhc_huber_delta      = f["nhc_huber_delta"].as<double>();
     }
+    // Apply unified gates if present (overrides)
+    if (config["gates"]) {
+        auto g = config["gates"];
+        if (g["yaw_rate"]) {
+            auto y = g["yaw_rate"];
+            if (y["thr"])   odo_yaw_rate_thresh = y["thr"].as<double>();
+            if (y["scale"]) odo_yaw_rate_scale  = y["scale"].as<double>();
+        }
+        if (g["accel"]) {
+            auto a = g["accel"];
+            if (a["thr"])   odo_accel_thresh = a["thr"].as<double>();
+            if (a["scale"]) odo_accel_scale  = a["scale"].as<double>();
+        }
+    }
 
     // Differential yaw-rate (Δω) factor configuration
     YAML::Node diffyaw_cfg          = config["diff_yaw"];
@@ -273,6 +297,11 @@ int main(int argc, char *argv[]) {
     bool   diffyaw_hard_gate        = false; // skip residual when exceeding thresholds
     double diffyaw_gate_yaw         = 1.0;   // rad/s (used if not using shared gates)
     double diffyaw_gate_acc         = 5.0;   // m/s^2 (used if not using shared gates)
+    bool   diffyaw_log_stats        = false; // dump dyaw_stats.csv
+    bool   diffyaw_estimate_baseline= false; // estimate b online
+    double diffyaw_baseline_sigma   = 0.05;  // m (prior sigma)
+    double diffyaw_freeze_duration  = 30.0;  // s
+    std::string diffyaw_gate_mode   = "";   // optional: hard|scale|off
     if (diffyaw_cfg) {
         if (diffyaw_cfg["enable"])           use_diffyaw                = diffyaw_cfg["enable"].as<bool>();
         if (diffyaw_cfg["baseline_m"])       diffyaw_baseline           = diffyaw_cfg["baseline_m"].as<double>();
@@ -283,6 +312,23 @@ int main(int argc, char *argv[]) {
         if (diffyaw_cfg["hard_gate"])         diffyaw_hard_gate          = diffyaw_cfg["hard_gate"].as<bool>();
         if (diffyaw_cfg["max_yaw_rate_radps"]) diffyaw_gate_yaw          = diffyaw_cfg["max_yaw_rate_radps"].as<double>();
         if (diffyaw_cfg["max_accel_ms2"])      diffyaw_gate_acc          = diffyaw_cfg["max_accel_ms2"].as<double>();
+        if (diffyaw_cfg["log_stats"])         diffyaw_log_stats          = diffyaw_cfg["log_stats"].as<bool>();
+        if (diffyaw_cfg["estimate_baseline"]) diffyaw_estimate_baseline  = diffyaw_cfg["estimate_baseline"].as<bool>();
+        if (diffyaw_cfg["baseline_sigma_m"])  diffyaw_baseline_sigma     = diffyaw_cfg["baseline_sigma_m"].as<double>();
+        if (diffyaw_cfg["freeze_duration_s"]) diffyaw_freeze_duration    = diffyaw_cfg["freeze_duration_s"].as<double>();
+        if (diffyaw_cfg["gate_mode"])         diffyaw_gate_mode          = diffyaw_cfg["gate_mode"].as<std::string>();
+    }
+    if (!diffyaw_gate_mode.empty()) {
+        if (diffyaw_gate_mode == "hard") {
+            diffyaw_hard_gate = true;
+        } else if (diffyaw_gate_mode == "off") {
+            diffyaw_hard_gate = false;
+            diffyaw_use_shared_gates = false; // no scaling
+        } else {
+            // scale
+            diffyaw_hard_gate = false;
+            // if gates block present, scaling uses shared values
+        }
     }
 
     // GNSS浠跨湡涓柇閰嶇疆
@@ -590,10 +636,26 @@ int main(int argc, char *argv[]) {
                                 if (s.name == "right") right_src = &s;
                             }
                             if (left_src && right_src) {
+                                // Stats counters
+                                size_t pairs_total = 0, kept_cnt = 0, scaled_cnt = 0, gated_cnt = 0;
+
                                 // Two-pointer pairing within tolerance
                                 size_t li = 0, ri = 0;
                                 const auto &LB = left_src->buffer;
                                 const auto &RB = right_src->buffer;
+                                auto interp_odo = [&](const std::deque<ODO>& B, size_t idx, double t) -> double {
+                                    if (B.empty()) return 0.0;
+                                    size_t i0 = std::min(idx, B.size()-1);
+                                    size_t i1 = std::min(i0+1, B.size()-1);
+                                    const double t0 = B[i0].time;
+                                    const double v0 = B[i0].vel;
+                                    if (i1 == i0) return v0;
+                                    const double t1 = B[i1].time;
+                                    const double v1 = B[i1].vel;
+                                    if (t1 <= t0) return v0;
+                                    double a = std::clamp((t - t0)/(t1 - t0), 0.0, 1.0);
+                                    return v0 + a * (v1 - v0);
+                                };
                                 while (li < LB.size() && ri < RB.size()) {
                                     double tl = LB[li].time, tr = RB[ri].time;
                                     if (tl < timelist.front() - MINIMUM_INTERVAL) { ++li; continue; }
@@ -602,9 +664,10 @@ int main(int argc, char *argv[]) {
 
                                     double dt_pair = fabs(tl - tr);
                                     if (dt_pair <= diffyaw_pair_tolerance_s) {
+                                        pairs_total++;
                                         const double t = 0.5 * (tl + tr);
-                                        const double vL = LB[li].vel;
-                                        const double vR = RB[ri].vel;
+                                        const double vL = interp_odo(LB, li, t);
+                                        const double vR = interp_odo(RB, ri, t);
                                         const double omega_wheel = (vL - vR) / std::max(diffyaw_baseline, 1e-6);
 
                                         // Find nearest graph node
@@ -637,22 +700,53 @@ int main(int argc, char *argv[]) {
                                             double acc_thr = diffyaw_use_shared_gates ? odo_accel_thresh     : diffyaw_gate_acc;
                                             if (abs_yaw > yaw_thr || accmag > acc_thr) {
                                                 // skip this residual
+                                                gated_cnt++;
                                                 ++li; ++ri;
                                                 continue;
                                             }
                                         } else if (diffyaw_use_shared_gates) {
                                             if (abs_yaw > odo_yaw_rate_thresh) sigma *= odo_yaw_rate_scale;
                                             if (accmag  > odo_accel_thresh)    sigma *= odo_accel_scale;
+                                            if (sigma != diffyaw_sigma) scaled_cnt++;
                                         }
 
-                                        auto dy = new DiffYawFactor(omega_b.z(), omega_wheel, sigma, mix_dim);
-                                        problem.AddResidualBlock(dy, dy_loss, statedatalist[nearest].mix);
+                                        if (diffyaw_estimate_baseline) {
+                                            static double baseline_param = diffyaw_baseline;
+                                            problem.AddParameterBlock(&baseline_param, 1);
+                                            // Freeze for initial duration
+                                            bool freeze_now = (timelist.back() - timelist.front()) < diffyaw_freeze_duration;
+                                            if (freeze_now) problem.SetParameterBlockConstant(&baseline_param);
+                                            // Prior on baseline
+                                            problem.AddResidualBlock(new ScalarPriorFactor(diffyaw_baseline, diffyaw_baseline_sigma), nullptr, &baseline_param);
+
+                                            auto dy = new DiffYawFactor(omega_b.z(), vL, vR, sigma, mix_dim, true);
+                                            problem.AddResidualBlock(dy, dy_loss, statedatalist[nearest].mix, &baseline_param);
+                                        } else {
+                                            auto dy = new DiffYawFactor(omega_b.z(), omega_wheel, sigma, mix_dim);
+                                            problem.AddResidualBlock(dy, dy_loss, statedatalist[nearest].mix);
+                                        }
+                                        kept_cnt++;
 
                                         ++li; ++ri;
                                     } else if (tl < tr) {
                                         ++li;
                                     } else {
                                         ++ri;
+                                    }
+                                }
+
+                                if (diffyaw_log_stats) {
+                                    static bool header = false;
+                                    std::string path = outputpath + "/dyaw_stats.csv";
+                                    std::ofstream ofs(path, std::ios::app);
+                                    if (ofs) {
+                                        if (!header) {
+                                            ofs << "time_end,pairs,kept,scaled,gated,gate_mode,estimate_b,freeze_s\n";
+                                            header = true;
+                                        }
+                                        std::string mode = diffyaw_hard_gate ? "hard" : (diffyaw_use_shared_gates ? "scale" : "off");
+                                        double win_len = timelist.back() - timelist.front();
+                                        ofs << timelist.back() << "," << pairs_total << "," << kept_cnt << "," << scaled_cnt << "," << gated_cnt << "," << mode << "," << (diffyaw_estimate_baseline?1:0) << "," << win_len << "\n";
                                     }
                                 }
                             }

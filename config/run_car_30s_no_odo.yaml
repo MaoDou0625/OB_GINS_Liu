@@ -22,6 +22,11 @@ antlever: [ -0.073, 0.302, 0.087 ]
 odolever: [ -0.64, -0.628, 2.122 ]
 bodyangle: [ 0, -0.30, -1.09 ]
 
+# Unified gates for yaw-rate and acceleration (overrides factor defaults)
+gates:
+  yaw_rate: { thr: 0.5, scale: 2.0 }
+  accel:    { thr: 3.0, scale: 2.0 }
+
 odometer_left:
   isuseodo: true
   file: "D:/Code/OB_GINS/dataset/car/Odometer/odo_left.txt"
@@ -44,9 +49,14 @@ diff_yaw:
   huber_delta: 1.0
   pair_tolerance_s: 0.01  # max time gap to pair L/R (seconds)
   use_shared_odo_gates: true  # reuse yaw_rate/acc gates (for scaling/gating)
-  hard_gate: true             # skip Δω residual under extreme yaw/acc
+  gate_mode: hard             # hard|scale|off
+  hard_gate: true             # kept for backward-compatibility
   max_yaw_rate_radps: 1.0     # if not using shared gates
   max_accel_ms2: 5.0          # if not using shared gates
+  estimate_baseline: true     # enable online baseline b estimation
+  baseline_sigma_m: 0.05      # prior sigma for baseline
+  freeze_duration_s: 30       # freeze b for first N seconds
+  log_stats: true             # dump dyaw_stats.csv per window
 
 imumodel:
   arw: 0.1
