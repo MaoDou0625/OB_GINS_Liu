@@ -38,6 +38,7 @@
 #include "src/factors/diff_yaw_factor.h"
 #include "src/factors/scalar_prior_factor.h"
 #include "src/factors/gyro_share_factor.h"
+#include "src/factors/att_share_factor.h"
 #include "src/preintegration/imu_error_factor.h"
 #include "src/preintegration/preintegration.h"
 #include "src/preintegration/preintegration_factor.h"
@@ -82,6 +83,12 @@ struct WheelImuSource {
     double gyro_sigma = 0.03;              // default rad/s for gyro_share
     double huber_delta = 1.0;
     double rbw_prior_sigma_rad = 3.0 * M_PI / 180.0; // prior for d_ang
+    // attitude share
+    double att_sigma_rad = 2.0 * M_PI / 180.0; // default 2 deg
+    double att_huber_delta = 1.0;
+    // orientation estimate from wheel IMU dtheta
+    Eigen::Quaterniond q_est = Eigen::Quaterniond::Identity();
+    bool q_inited = false;
 };
 
 int main(int argc, char *argv[]) {
@@ -269,6 +276,11 @@ int main(int argc, char *argv[]) {
             if (gs["sigma_radps"]) src.gyro_sigma = gs["sigma_radps"].as<double>();
             if (gs["huber_delta"]) src.huber_delta = gs["huber_delta"].as<double>();
             if (gs["rbw_prior_sigma_deg"]) src.rbw_prior_sigma_rad = gs["rbw_prior_sigma_deg"].as<double>()*D2R;
+        }
+        if (node["att_share"]) {
+            auto as = node["att_share"];
+            if (as["sigma_deg"]) src.att_sigma_rad = as["sigma_deg"].as<double>()*D2R;
+            if (as["huber_delta"]) src.att_huber_delta = as["huber_delta"].as<double>();
         }
         src.enabled = true; return src;
     };
@@ -874,7 +886,7 @@ int main(int argc, char *argv[]) {
                     }
                 }
 
-                // Wheel-IMU gyro share factors (per-source; works with one or both sources)
+                // Wheel-IMU gyro/att share factors (per-source; works with one or both sources)
                 if (has_wimu_sources) {
                     const int mix_dim = Preintegration::numMixParameter(preintegration_options);
                     for (auto &s : wimu_sources) {
@@ -895,6 +907,7 @@ int main(int argc, char *argv[]) {
                         problem.AddResidualBlock(new AnglesPriorFactor(s.rbw_prior_sigma_rad), nullptr, rbw_param.data());
 
                         ceres::LossFunction *gs_loss = new ceres::HuberLoss(s.huber_delta);
+                        ceres::LossFunction *as_loss = new ceres::HuberLoss(s.att_huber_delta);
                         for (const auto &m : s.buffer) {
                             if (m.time < timelist.front() - MINIMUM_INTERVAL || m.time > timelist.back() + MINIMUM_INTERVAL) continue;
                             // nearest node index
@@ -929,6 +942,24 @@ int main(int argc, char *argv[]) {
 
                             auto f = new GyroShareFactor(omega_b, omega_w, s.rbw_base, sigma, mix_dim);
                             problem.AddResidualBlock(f, gs_loss, statedatalist[nearest].mix, rbw_param.data());
+
+                            // Attitude share: integrate wheel IMU orientation and match body orientation via extrinsics
+                            // Initialize q_est at first seen sample to predicted orientation (Rwb_base * R_body)
+                            if (!s.q_inited) {
+                                Eigen::Quaterniond q_body(statedatalist[nearest].pose[6],
+                                                          statedatalist[nearest].pose[3],
+                                                          statedatalist[nearest].pose[4],
+                                                          statedatalist[nearest].pose[5]);
+                                Eigen::Matrix3d Rbw = Rotation::euler2matrix(s.rbw_base);
+                                Eigen::Matrix3d Rwb = Rbw.transpose();
+                                s.q_est = Rotation::matrix2quaternion(Rwb * q_body.toRotationMatrix());
+                                s.q_inited = true;
+                            }
+                            // integrate wheel delta angle
+                            Eigen::Quaterniond dq = Rotation::rotvec2quaternion(m.dtheta);
+                            s.q_est = s.q_est * dq;
+                            auto as = new AttShareFactor(s.q_est, s.rbw_base, s.att_sigma_rad);
+                            problem.AddResidualBlock(as, as_loss, statedatalist[nearest].pose, rbw_param.data());
                         }
                     }
                 }
