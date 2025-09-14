@@ -37,6 +37,7 @@
 #include "src/factors/nhc_factor.h"
 #include "src/factors/diff_yaw_factor.h"
 #include "src/factors/scalar_prior_factor.h"
+#include "src/factors/gyro_share_factor.h"
 #include "src/preintegration/imu_error_factor.h"
 #include "src/preintegration/preintegration.h"
 #include "src/preintegration/preintegration_factor.h"
@@ -48,6 +49,7 @@
 #include <cmath>
 #include <memory>
 #include <yaml-cpp/yaml.h>
+#include <fstream>
 
 #define INTEGRATION_LENGTH 1.0
 #define MINIMUM_INTERVAL 0.001
@@ -67,6 +69,19 @@ struct OdoSource {
     Vector3d lever = Vector3d::Zero();       // lever arm (m)
     Vector3d base_angle = Vector3d::Zero();  // odo mounting angles (deg in YAML -> rad here)
     bool enabled = false;
+};
+
+// Helper container for optional wheel IMU streams (left/right)
+struct WheelImuSource {
+    std::string name;
+    std::unique_ptr<ImuFileLoader> loader; // may be null if disabled
+    std::deque<IMU> buffer;                // IMU increments within window
+    IMU curr{};
+    Vector3d rbw_base = Vector3d::Zero();  // wheel->body base extrinsic (rad)
+    bool enabled = false;
+    double gyro_sigma = 0.03;              // default rad/s for gyro_share
+    double huber_delta = 1.0;
+    double rbw_prior_sigma_rad = 3.0 * M_PI / 180.0; // prior for d_ang
 };
 
 int main(int argc, char *argv[]) {
@@ -233,6 +248,36 @@ int main(int argc, char *argv[]) {
     }
     bool has_odo_sources = !odo_sources.empty();
 
+    // Parse wheel IMU sources (optional left/right)
+    auto load_wheelimu_node = [&](const YAML::Node &node, const std::string &tag) {
+        WheelImuSource src;
+        src.name = tag;
+        if (!node || !node["enable"] || !node["enable"].as<bool>()) {
+            src.enabled = false; return src;
+        }
+        std::string path = node["file"] ? node["file"].as<std::string>() : "";
+        int cols = node["columns"] ? node["columns"].as<int>() : 7;
+        int rate = node["rate_hz"] ? node["rate_hz"].as<int>() : imudatarate;
+        if (path.empty()) { std::cout << "Wheel-IMU("<<tag<<") enabled but no file specified" << std::endl; return src; }
+        src.loader = std::make_unique<ImuFileLoader>(path, cols, rate);
+        if (!src.loader->isOpen()) { std::cout << "Failed to open wheel-IMU: "<<path<< std::endl; src.loader.reset(); return src; }
+        if (node["rbw_deg"]) {
+            auto a = node["rbw_deg"].as<std::vector<double>>(); if (a.size()==3) src.rbw_base = Vector3d(a.data()) * D2R;
+        }
+        if (node["gyro_share"]) {
+            auto gs = node["gyro_share"];
+            if (gs["sigma_radps"]) src.gyro_sigma = gs["sigma_radps"].as<double>();
+            if (gs["huber_delta"]) src.huber_delta = gs["huber_delta"].as<double>();
+            if (gs["rbw_prior_sigma_deg"]) src.rbw_prior_sigma_rad = gs["rbw_prior_sigma_deg"].as<double>()*D2R;
+        }
+        src.enabled = true; return src;
+    };
+
+    std::vector<WheelImuSource> wimu_sources;
+    if (config["wheel_imu_left"])  { auto s = load_wheelimu_node(config["wheel_imu_left"],  "left");  if (s.enabled) wimu_sources.push_back(std::move(s)); }
+    if (config["wheel_imu_right"]) { auto s = load_wheelimu_node(config["wheel_imu_right"], "right"); if (s.enabled) wimu_sources.push_back(std::move(s)); }
+    bool has_wimu_sources = !wimu_sources.empty();
+
     // Global gates override (unified yaw/acc thresholds/scales)
     if (config["gates"]) {
         auto g = config["gates"];
@@ -330,6 +375,8 @@ int main(int argc, char *argv[]) {
             // if gates block present, scaling uses shared values
         }
     }
+    // Baseline optimization parameter (shared across windows)
+    double dyaw_baseline_param = diffyaw_baseline;
 
     // GNSS浠跨湡涓柇閰嶇疆
     // GNSS outage parameters
@@ -361,6 +408,15 @@ int main(int argc, char *argv[]) {
             src.curr = src.loader->next();
             while (src.curr.time < starttime && !src.loader->isEof()) {
                 src.curr = src.loader->next();
+            }
+        }
+    }
+    if (has_wimu_sources) {
+        for (auto &s : wimu_sources) {
+            if (!s.loader) continue;
+            s.curr = s.loader->next();
+            while (s.curr.time < starttime && !s.loader->isEof()) {
+                s.curr = s.loader->next();
             }
         }
     }
@@ -711,16 +767,15 @@ int main(int argc, char *argv[]) {
                                         }
 
                                         if (diffyaw_estimate_baseline) {
-                                            static double baseline_param = diffyaw_baseline;
-                                            problem.AddParameterBlock(&baseline_param, 1);
+                                            problem.AddParameterBlock(&dyaw_baseline_param, 1);
                                             // Freeze for initial duration
                                             bool freeze_now = (timelist.back() - timelist.front()) < diffyaw_freeze_duration;
-                                            if (freeze_now) problem.SetParameterBlockConstant(&baseline_param);
+                                            if (freeze_now) problem.SetParameterBlockConstant(&dyaw_baseline_param);
                                             // Prior on baseline
-                                            problem.AddResidualBlock(new ScalarPriorFactor(diffyaw_baseline, diffyaw_baseline_sigma), nullptr, &baseline_param);
+                                            problem.AddResidualBlock(new ScalarPriorFactor(diffyaw_baseline, diffyaw_baseline_sigma), nullptr, &dyaw_baseline_param);
 
                                             auto dy = new DiffYawFactor(omega_b.z(), vL, vR, sigma, mix_dim, true);
-                                            problem.AddResidualBlock(dy, dy_loss, statedatalist[nearest].mix, &baseline_param);
+                                            problem.AddResidualBlock(dy, dy_loss, statedatalist[nearest].mix, &dyaw_baseline_param);
                                         } else {
                                             auto dy = new DiffYawFactor(omega_b.z(), omega_wheel, sigma, mix_dim);
                                             problem.AddResidualBlock(dy, dy_loss, statedatalist[nearest].mix);
@@ -747,6 +802,20 @@ int main(int argc, char *argv[]) {
                                         std::string mode = diffyaw_hard_gate ? "hard" : (diffyaw_use_shared_gates ? "scale" : "off");
                                         double win_len = timelist.back() - timelist.front();
                                         ofs << timelist.back() << "," << pairs_total << "," << kept_cnt << "," << scaled_cnt << "," << gated_cnt << "," << mode << "," << (diffyaw_estimate_baseline?1:0) << "," << win_len << "\n";
+                                    }
+                                    // Also dump baseline snapshot (pre-solve for current window)
+                                    if (diffyaw_estimate_baseline) {
+                                        std::string pathb = outputpath + "/dyaw_baseline.csv";
+                                        std::ofstream ofb(pathb, std::ios::app);
+                                        if (ofb) {
+                                            static bool header_b2 = false;
+                                            if (!header_b2) {
+                                                ofb << "time_end,baseline,freeze\n";
+                                                header_b2 = true;
+                                            }
+                                            bool freeze_now = (timelist.back() - timelist.front()) < diffyaw_freeze_duration;
+                                            ofb << timelist.back() << "," << dyaw_baseline_param << "," << (freeze_now?1:0) << "\n";
+                                        }
                                     }
                                 }
                             }
@@ -789,6 +858,80 @@ int main(int argc, char *argv[]) {
                 // solve the Least-Squares problem
                 options.max_num_iterations = num_iterations / 4;
                 solver.Solve(options, &problem, &summary);
+
+                // Log baseline convergence if enabled
+                if (use_diffyaw && diffyaw_estimate_baseline && diffyaw_log_stats) {
+                    std::string pathb = outputpath + "/dyaw_baseline.csv";
+                    std::ofstream ofb(pathb, std::ios::app);
+                    if (ofb) {
+                        static bool header_b = false;
+                        if (!header_b) {
+                            ofb << "time_end,baseline,freeze\n";
+                            header_b = true;
+                        }
+                        bool freeze_now = (timelist.back() - timelist.front()) < diffyaw_freeze_duration;
+                        ofb << *timelist.rbegin() << "," << dyaw_baseline_param << "," << (freeze_now?1:0) << "\n";
+                    }
+                }
+
+                // Wheel-IMU gyro share factors (per-source; works with one or both sources)
+                if (has_wimu_sources) {
+                    const int mix_dim = Preintegration::numMixParameter(preintegration_options);
+                    for (auto &s : wimu_sources) {
+                        if (!s.loader) continue;
+                        // advance buffer
+                        while (!s.loader->isEof() && s.curr.time <= *timelist.rbegin()) {
+                            s.buffer.push_back(s.curr);
+                            s.curr = s.loader->next();
+                        }
+                        while (!s.buffer.empty() && s.buffer.front().time < timelist.front() - 0.5 * INTEGRATION_LENGTH) {
+                            s.buffer.pop_front();
+                        }
+                        // small-angle parameter for extrinsic delta with prior
+                        static std::unordered_map<std::string, std::array<double,3>> rbw_param_map;
+                        if (!rbw_param_map.count(s.name)) rbw_param_map[s.name] = {0.0,0.0,0.0};
+                        auto &rbw_param = rbw_param_map[s.name];
+                        problem.AddParameterBlock(rbw_param.data(), 3);
+                        problem.AddResidualBlock(new AnglesPriorFactor(s.rbw_prior_sigma_rad), nullptr, rbw_param.data());
+
+                        ceres::LossFunction *gs_loss = new ceres::HuberLoss(s.huber_delta);
+                        for (const auto &m : s.buffer) {
+                            if (m.time < timelist.front() - MINIMUM_INTERVAL || m.time > timelist.back() + MINIMUM_INTERVAL) continue;
+                            // nearest node index
+                            size_t nearest = 0; double best = 1e9;
+                            for (size_t i = 0; i < timelist.size(); ++i) {
+                                double d = fabs(m.time - timelist[i]); if (d < best) { best = d; nearest = i; }
+                            }
+                            // omega_body at m.time
+                            Vector3d omega_b = Vector3d::Zero();
+                            for (size_t ii = 1; ii < imuqueue.size(); ++ii) {
+                                if (imuqueue[ii - 1].time <= m.time && imuqueue[ii].time >= m.time) {
+                                    double dt = std::max(imuqueue[ii].dt, 1e-6);
+                                    omega_b = imuqueue[ii].dtheta / dt; break;
+                                }
+                            }
+                            if (omega_b.isZero(0)) omega_b = (omega_nodes.size()>nearest)? omega_nodes[nearest]:Vector3d::Zero();
+                            // omega_wheel from wheel IMU increment
+                            double dtw = std::max(m.dt, 1e-6);
+                            Vector3d omega_w = m.dtheta / dtw;
+
+                            // gates: reuse ya w/acc thresholds for sigma scaling
+                            Vector3d acc_b = Vector3d::Zero();
+                            for (size_t ii = 1; ii < imuqueue.size(); ++ii) {
+                                if (imuqueue[ii - 1].time <= m.time && imuqueue[ii].time >= m.time) {
+                                    double dt = std::max(imuqueue[ii].dt, 1e-6);
+                                    acc_b = imuqueue[ii].dvel / dt; break;
+                                }
+                            }
+                            double sigma = s.gyro_sigma;
+                            if (fabs(omega_b.z()) > odo_yaw_rate_thresh) sigma *= odo_yaw_rate_scale;
+                            if (acc_b.norm() > odo_accel_thresh) sigma *= odo_accel_scale;
+
+                            auto f = new GyroShareFactor(omega_b, omega_w, s.rbw_base, sigma, mix_dim);
+                            problem.AddResidualBlock(f, gs_loss, statedatalist[nearest].mix, rbw_param.data());
+                        }
+                    }
+                }
 
                 // TODO: Just a example, you need remodify.
                 // Do GNSS outlier culling using chi-square test
