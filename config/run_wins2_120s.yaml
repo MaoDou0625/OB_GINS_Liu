@@ -1,0 +1,80 @@
+imufile: "D:/Code/OB_GINS/dataset/wheel-ins2_dataset/body-imu/tri_C1_imu_increments.txt"
+gnssfile: "D:/Code/OB_GINS/dataset/wheel-ins2_dataset/ground_truth/GNSS_2Hz.pos"
+outputpath: "D:/Code/OB_GINS/out/wins2_120s"
+
+windows: 30
+starttime: 132200
+endtime: 132320   # 120s
+
+num_iterations: 20
+is_outlier_culling: false
+
+initvel: [ 0, 0, 0 ]
+initatt: [ 0, 0, 0 ]
+initgb: [ 0, 0, 0 ]
+initab: [ 0, 0, 0 ]
+
+imudatalen: 7
+imudatarate: 200
+isearth: true
+
+antlever: [ 0.0, 0.0, 0.0 ]
+odolever: [ 0.0, 0.0, 0.0 ]
+bodyangle: [ 0.0, 0.0, 0.0 ]
+
+gates:
+  yaw_rate: { thr: 0.5, scale: 2.0 }
+  accel:    { thr: 3.0, scale: 2.0 }
+
+# Wheel-IMU sources
+wheel_imu_left:
+  enable: true
+  file: "D:/Code/OB_GINS/dataset/wheel-ins2_dataset/left-wheel-imu/tri_C1_imu_increments.txt"
+  columns: 7
+  rate_hz: 200
+  rbw_deg: [ 0, 0, 0 ]
+  gyro_share:
+    sigma_radps: 0.03
+    huber_delta: 1.0
+    rbw_prior_sigma_deg: 3.0
+  att_share:
+    sigma_deg: 2.0
+    huber_delta: 1.0
+
+wheel_imu_right:
+  enable: true
+  file: "D:/Code/OB_GINS/dataset/wheel-ins2_dataset/right-wheel-imu/tri_C1_imu_increments.txt"
+  columns: 7
+  rate_hz: 200
+  rbw_deg: [ 0, 0, 0 ]
+  gyro_share:
+    sigma_radps: 0.03
+    huber_delta: 1.0
+    rbw_prior_sigma_deg: 3.0
+  att_share:
+    sigma_deg: 2.0
+    huber_delta: 1.0
+
+# Disable file-based odometer and diff_yaw for initial run
+odometer_left:
+  isuseodo: false
+odometer_right:
+  isuseodo: false
+
+diff_yaw:
+  enable: false
+
+imumodel:
+  arw: 0.1
+  vrw: 0.1
+  gbstd: 25.0
+  abstd: 200.0
+  corrtime: 1.0
+
+isuseoutage: false
+outagetime: 0
+outagelen: 0
+outageperiod: 0
+
+gnssthreshold: 0.2
+
