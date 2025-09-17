@@ -145,10 +145,47 @@ int main(int argc, char *argv[]) {
     // Input/output paths and IMU file format
     // gnssfile/imufile/outputpath + imudatalen (columns) and imudatarate (Hz)
     std::string gnsspath   = config["gnssfile"].as<std::string>();
-    std::string imupath    = config["imufile"].as<std::string>();
     std::string outputpath = config["outputpath"].as<std::string>();
-    int imudatalen         = config["imudatalen"].as<int>();
-    int imudatarate        = config["imudatarate"].as<int>();
+
+    int imudatalen  = config["imudatalen"] ? config["imudatalen"].as<int>() : 7;
+    int imudatarate = config["imudatarate"] ? config["imudatarate"].as<int>() : 200;
+    std::string imupath;
+    std::string active_imu_label;
+
+    auto configureImuFromBlock = [&](const char *key) {
+        YAML::Node node = config[key];
+        if (!node) {
+            return false;
+        }
+        if (!node["isuseimu"] || !node["isuseimu"].as<bool>()) {
+            return false;
+        }
+        if (!node["file"]) {
+            std::cout << "Config block '" << key << "' enabled but missing file entry" << std::endl;
+            return false;
+        }
+        if (!active_imu_label.empty()) {
+            std::cout << "Multiple IMU sources enabled; keeping '" << active_imu_label << "' and ignoring '" << key << "'" << std::endl;
+            return false;
+        }
+        imupath = node["file"].as<std::string>();
+        if (node["datalen"]) {
+            imudatalen = node["datalen"].as<int>();
+        }
+        if (node["rate"]) {
+            imudatarate = node["rate"].as<int>();
+        }
+        active_imu_label = key;
+        return true;
+    };
+
+    configureImuFromBlock("imu_main");
+    configureImuFromBlock("wheel_imu");
+
+    if (imupath.empty()) {
+        std::cout << "配置文件中未启用任何 IMU 数据源，请检查 imu_main / wheel_imu 区块。" << std::endl;
+        return -1;
+    }
 
     // Consider Earth's rotation in mechanization (Coriolis and Earth-rate effects)
     // Affects preintegration dynamics if true
@@ -176,11 +213,76 @@ int main(int argc, char *argv[]) {
     // IMU鍣０鍙傛暟
     // IMU noise parameters
     auto parameters          = std::make_shared<IntegrationParameters>();
-    parameters->gyr_arw      = config["imumodel"]["arw"].as<double>() * D2R / 60.0;
-    parameters->gyr_bias_std = config["imumodel"]["gbstd"].as<double>() * D2R / 3600.0;
-    parameters->acc_vrw      = config["imumodel"]["vrw"].as<double>() / 60.0;
-    parameters->acc_bias_std = config["imumodel"]["abstd"].as<double>() * 1.0e-5;
-    parameters->corr_time    = config["imumodel"]["corrtime"].as<double>() * 3600;
+
+        // 优先从启用的 IMU 区块(imu_main / wheel_imu)下的 imumodel 读取；没有则回退到全局 imumodel；再没有则用默认值。
+    YAML::Node imu_model;
+    if (!active_imu_label.empty()) {
+        YAML::Node sel = config[active_imu_label.c_str()];
+        if (sel && sel["imumodel"]) imu_model = sel["imumodel"];
+    }
+    if (!imu_model && config["imumodel"]) {
+        imu_model = config["imumodel"];
+    }
+
+    double arw_deg_per_hr      = 0.24;  // 默认与历史配置一致
+    double gbstd_deg_per_hr    = 50.0;
+    double vrw_mps_sqrt_hour   = 0.24;
+    double abstd_mg            = 250.0;
+    double corr_time_hours     = 1.0;
+
+    auto loadImuModelValue = [&](const char *key, double &target) {
+        if (!imu_model) return;
+        YAML::Node v = imu_model[key];
+        if (v && v.IsScalar()) {
+            try { target = v.as<double>(); } catch (...) {}
+        }
+    };
+
+    loadImuModelValue("arw", arw_deg_per_hr);
+    loadImuModelValue("gbstd", gbstd_deg_per_hr);
+    loadImuModelValue("vrw", vrw_mps_sqrt_hour);
+    loadImuModelValue("abstd", abstd_mg);
+    loadImuModelValue("corrtime", corr_time_hours);
+
+    parameters->gyr_arw      = arw_deg_per_hr * D2R / 60.0;
+    parameters->gyr_bias_std = gbstd_deg_per_hr * D2R / 3600.0;
+    parameters->acc_vrw      = vrw_mps_sqrt_hour / 60.0;
+    parameters->acc_bias_std = abstd_mg * 1.0e-5;
+    parameters->corr_time    = corr_time_hours * 3600.0;
+
+    // Override IMU noise parameters from YAML (supports both top-level and per-IMU blocks)
+    // Ensures values come from YAML instead of hard-coded defaults when provided.
+    {
+        YAML::Node imu_model_fix;
+        if (!active_imu_label.empty()) {
+            YAML::Node sel = config[active_imu_label.c_str()];
+            if (sel && sel["imumodel"]) imu_model_fix = sel["imumodel"];
+        }
+        if ((!imu_model_fix || !imu_model_fix.IsDefined()) && config["imumodel"]) {
+            imu_model_fix = config["imumodel"];
+        }
+        auto getv = [&](const char *key, double defv) -> double {
+            if (imu_model_fix && imu_model_fix.IsDefined()) {
+                YAML::Node v = imu_model_fix[key];
+                if (v && v.IsScalar()) {
+                    try { return v.as<double>(); } catch (...) {}
+                }
+            }
+            return defv;
+        };
+        // Read YAML values with defaults and update params
+        const double arw_dph      = getv("arw",     0.24);
+        const double vrw_mps_hr   = getv("vrw",     0.24);
+        const double gbstd_dph    = getv("gbstd",  50.0);
+        const double abstd_mg     = getv("abstd", 250.0);
+        const double corrtime_hr  = getv("corrtime", 1.0);
+
+        parameters->gyr_arw      = arw_dph * D2R / 60.0;       // deg/sqrt(hr) -> rad/s/sqrt(s)
+        parameters->acc_vrw      = vrw_mps_hr / 60.0;          // m/s/sqrt(hr) -> m/s/sqrt(s)
+        parameters->gyr_bias_std = gbstd_dph * D2R / 3600.0;   // deg/hr -> rad/s
+        parameters->acc_bias_std = abstd_mg * 1.0e-5;          // mGal -> m/s^2
+        parameters->corr_time    = corrtime_hr * 3600.0;       // hr -> s
+    }
 
     // Odometer base options (optional block). Provide safe defaults if missing.
     YAML::Node odo_root  = config["odometer"];
@@ -1225,3 +1327,7 @@ int isNeedInterpolation(const IMU &imu0, const IMU &imu1, double mid) {
 
     return 0;
 }
+
+
+
+
