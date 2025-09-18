@@ -91,6 +91,12 @@ struct ImuSource {
     Vector3d lever = Vector3d::Zero();           // lever (m)
     bool is_wheel = false;
 
+    // Mounting parameters per-IMU (optional, fall back to global if missing)
+    Vector3d antlever = Vector3d::Zero();      // IMU->GNSS antenna in body frame (m)
+    Vector3d bodyangle = Vector3d::Zero();     // IMU->vehicle angles (rad)
+    bool has_antlever = false;                 // whether YAML provided antlever
+    bool has_bodyangle = false;                // whether YAML provided bodyangle
+
     // Share-factor params (optional)
     double gyro_sigma = 0.03;              // rad/s
     double huber_delta = 1.0;
@@ -184,6 +190,9 @@ int main(int argc, char *argv[]) {
         if (node["extrinsic_deg"]) { auto a = node["extrinsic_deg"].as<std::vector<double>>(); if (a.size()==3) dst.extrinsic_angle = Vector3d(a.data())*D2R; }
         else if (node["rbw_deg"]) { auto a = node["rbw_deg"].as<std::vector<double>>(); if (a.size()==3) dst.extrinsic_angle = Vector3d(a.data())*D2R; }
         if (node["lever_m"]) { auto lv = node["lever_m"].as<std::vector<double>>(); if (lv.size()==3) dst.lever = Vector3d(lv.data()); }
+        // Per-IMU mounting (optional)
+        if (node["antlever"]) { auto v = node["antlever"].as<std::vector<double>>(); if (v.size()==3) { dst.antlever = Vector3d(v.data()); dst.has_antlever = true; } }
+        if (node["bodyangle"]) { auto v = node["bodyangle"].as<std::vector<double>>(); if (v.size()==3) { dst.bodyangle = Vector3d(v.data())*D2R; dst.has_bodyangle = true; } }
         if (dst.is_wheel) {
             if (node["gyro_share"]) { auto gs = node["gyro_share"]; if (gs["sigma_radps"]) dst.gyro_sigma = gs["sigma_radps"].as<double>(); if (gs["huber_delta"]) dst.huber_delta = gs["huber_delta"].as<double>(); if (gs["rbw_prior_sigma_deg"]) dst.rbw_prior_sigma_rad = gs["rbw_prior_sigma_deg"].as<double>()*D2R; }
             if (node["att_share"]) { auto as = node["att_share"]; if (as["sigma_deg"]) dst.att_sigma_rad = as["sigma_deg"].as<double>()*D2R; if (as["huber_delta"]) dst.att_huber_delta = as["huber_delta"].as<double>(); }
@@ -227,6 +236,12 @@ int main(int argc, char *argv[]) {
     vec = config["bodyangle"].as<std::vector<double>>();
     Vector3d bodyangle(vec.data());
     bodyangle *= D2R;
+
+    // Apply global mounting defaults to IMU sources if not provided per-IMU
+    for (auto *s : active_imus) {
+        if (!s->has_antlever) s->antlever = antlever;
+        if (!s->has_bodyangle) s->bodyangle = bodyangle;
+    }
 
     // IMU鍣０鍙傛暟
     // IMU noise parameters
@@ -316,7 +331,8 @@ int main(int argc, char *argv[]) {
     parameters->odo_std = odo_std_def;
     parameters->odo_srw = odo_srw_def;
     parameters->lodo    = odolever;
-    parameters->abv     = bodyangle;
+    // Mechanization chain uses driver IMU's bodyangle
+    parameters->abv     = driver->bodyangle;
 
     // Parse odometer sources: support legacy `odometer` and per-wheel `odometer_left/right`
     YAML::Node odo_cfg = odo_root; // may be null if odometer block absent
@@ -531,17 +547,35 @@ int main(int argc, char *argv[]) {
     // Decouple wheel speed from IMU preintegration; use IMU-only preintegration here
     Preintegration::PreintegrationOptions preintegration_options = Preintegration::getOptions(false, isearth);
 
+    // Read GNSS anchor selection (default to imu_main; support auto)
+    std::string gnss_anchor = "imu_main";
+    if (config["gnss_anchor"]) try { gnss_anchor = config["gnss_anchor"].as<std::string>(); } catch (...) {}
+    auto is_enabled = [&](ImuSource* s){ return s && s->enabled && s->loader!=nullptr; };
+    ImuSource* anchor = nullptr;
+    if (gnss_anchor == "imu_main") anchor = is_enabled(&imu_main)? &imu_main : nullptr;
+    else if (gnss_anchor == "wheel_imu_left") anchor = is_enabled(&imu_left)? &imu_left : nullptr;
+    else if (gnss_anchor == "wheel_imu_right") anchor = is_enabled(&imu_right)? &imu_right : nullptr;
+    else if (gnss_anchor == "auto") {
+        for (auto *s: active_imus) { if (is_enabled(s)) { anchor = s; break; } }
+    }
+    if (!anchor) {
+        // fallback to first enabled IMU and warn
+        for (auto *s: active_imus) { if (is_enabled(s)) { anchor = s; break; } }
+        std::cout << "[WARN] Invalid or disabled gnss_anchor; fallback to '" << (anchor? anchor->name: std::string("(none)")) << "'" << std::endl;
+    }
+    Vector3d antlever_anchor = anchor? anchor->antlever : antlever;
+
     // Initial state at first integer-second GNSS (position, attitude, velocity, biases)
     // initialization
     IntegrationState state_curr = {
         .time = round(gnss.time),
-        .p    = gnss.blh - Rotation::euler2quaternion(initatt) * antlever,
+        .p    = gnss.blh - Rotation::euler2quaternion(initatt) * antlever_anchor,
         .q    = Rotation::euler2quaternion(initatt),
         .v    = initvel,
         .bg   = initbg,
         .ba   = initba,
         .sodo = 0.0,
-        .abv  = {bodyangle[1], bodyangle[2]},
+        .abv  = {driver->bodyangle[1], driver->bodyangle[2]},
     };
     std::cout << "Initilization at " << gnss.time << " s " << std::endl;
 
@@ -707,7 +741,7 @@ int main(int argc, char *argv[]) {
                 ceres::LossFunction *loss_function = new ceres::HuberLoss(1.0);
                 std::vector<std::pair<double, ceres::ResidualBlockId>> gnss_residualblock_id;
                 for (const auto &gnss : gnsslist) {
-                    auto factor = new GnssFactor(gnss, antlever);
+                    auto factor = new GnssFactor(gnss, antlever_anchor);
                     for (size_t i = index; i <= preintegrationlist.size(); ++i) {
                         if (fabs(gnss.time - timelist[i]) < MINIMUM_INTERVAL) {
                             auto id = problem.AddResidualBlock(factor, loss_function, statedatalist[i].pose);
@@ -1086,7 +1120,7 @@ int main(int argc, char *argv[]) {
                     // Add GNSS factors without loss function
                     index = 0;
                     for (auto &gnss : gnsslist) {
-                        auto factor = new GnssFactor(gnss, antlever);
+                        auto factor = new GnssFactor(gnss, antlever_anchor);
                         for (size_t i = index; i <= preintegrationlist.size(); ++i) {
                             if (fabs(gnss.time - timelist[i]) < MINIMUM_INTERVAL) {
                                 problem.AddResidualBlock(factor, nullptr, statedatalist[i].pose);
