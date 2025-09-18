@@ -1,11 +1,12 @@
-cmake_minimum_required(VERSION 3.10)
+﻿cmake_minimum_required(VERSION 3.10)
 project(ob_gins)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
 
-
+if (MSVC)
+    add_compile_options(/bigobj)
+endif ()
 if (CMAKE_BUILD_TYPE MATCHES "Debug")
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall")
@@ -23,6 +24,7 @@ file(GLOB_RECURSE SOURCE
         src/factors/pose_manifold.cc
         src/preintegration/preintegration_base.cc
         src/preintegration/preintegration_normal.cc
+        src/preintegration/preintegration_wheel.cc
         src/preintegration/preintegration_earth.cc
         src/preintegration/preintegration_odo.cc
         src/preintegration/preintegration_earth_odo.cc)
@@ -49,3 +51,4 @@ target_link_libraries(${PROJECT_NAME}
 # Ceres
 find_package(Ceres REQUIRED)
 target_link_libraries(${PROJECT_NAME} ${CERES_LIBRARIES})
+

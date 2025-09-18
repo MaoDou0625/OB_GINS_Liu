@@ -42,6 +42,7 @@
 #include "src/preintegration/imu_error_factor.h"
 #include "src/preintegration/preintegration.h"
 #include "src/preintegration/preintegration_factor.h"
+#include "src/preintegration/preintegration_wheel.h"
 
 #include <absl/strings/str_format.h>
 #include <absl/time/clock.h>
@@ -51,6 +52,8 @@
 #include <memory>
 #include <yaml-cpp/yaml.h>
 #include <fstream>
+#include <array>
+#include <unordered_map>
 
 #define INTEGRATION_LENGTH 1.0
 #define MINIMUM_INTERVAL 0.001
@@ -72,21 +75,30 @@ struct OdoSource {
     bool enabled = false;
 };
 
-// Helper container for optional wheel IMU streams (left/right)
-struct WheelImuSource {
+// Unified IMU source (main or wheel)
+struct ImuSource {
     std::string name;
-    std::unique_ptr<ImuFileLoader> loader; // may be null if disabled
-    std::deque<IMU> buffer;                // IMU increments within window
-    IMU curr{};
-    Vector3d rbw_base = Vector3d::Zero();  // wheel->body base extrinsic (rad)
     bool enabled = false;
-    double gyro_sigma = 0.03;              // default rad/s for gyro_share
+    std::unique_ptr<ImuFileLoader> loader;
+    std::deque<IMU> buffer; // buffered increments within window
+    IMU curr{};             // latest read sample
+
+    IntegrationState state; // independent state for this IMU
+    std::deque<std::shared_ptr<PreintegrationBase>> preint; // independent preintegrations
+
+    // Wheel extrinsics (sensor->body)
+    Vector3d extrinsic_angle = Vector3d::Zero(); // rbw (rad)
+    Vector3d lever = Vector3d::Zero();           // lever (m)
+    bool is_wheel = false;
+
+    // Share-factor params (optional)
+    double gyro_sigma = 0.03;              // rad/s
     double huber_delta = 1.0;
-    double rbw_prior_sigma_rad = 3.0 * M_PI / 180.0; // prior for d_ang
-    // attitude share
-    double att_sigma_rad = 2.0 * M_PI / 180.0; // default 2 deg
+    double rbw_prior_sigma_rad = 3.0 * M_PI / 180.0; // rad
+    double att_sigma_rad = 2.0 * M_PI / 180.0;       // rad
     double att_huber_delta = 1.0;
-    // orientation estimate from wheel IMU dtheta
+
+    // Running attitude estimate for AttShareFactor
     Eigen::Quaterniond q_est = Eigen::Quaterniond::Identity();
     bool q_inited = false;
 };
@@ -147,55 +159,61 @@ int main(int argc, char *argv[]) {
     std::string gnsspath   = config["gnssfile"].as<std::string>();
     std::string outputpath = config["outputpath"].as<std::string>();
 
-    int imudatalen  = config["imudatalen"] ? config["imudatalen"].as<int>() : 7;
-    int imudatarate = config["imudatarate"] ? config["imudatarate"].as<int>() : 200;
-    std::string imupath;
-    std::string active_imu_label;
+    int imudatalen  = config["imudatalen"] ? config["imudatalen"].as<int>() : 7;    // default columns
+    int imudatarate = config["imudatarate"] ? config["imudatarate"].as<int>() : 200; // default Hz
 
-    auto configureImuFromBlock = [&](const char *key) {
-        YAML::Node node = config[key];
-        if (!node) {
-            return false;
+    ImuSource imu_main, imu_left, imu_right;
+    imu_main.name  = "main";
+    imu_left.name  = "left";
+    imu_right.name = "right";
+    imu_left.is_wheel = true;
+    imu_right.is_wheel = true;
+
+    auto load_imu_node = [&](const YAML::Node &node, ImuSource &dst) {
+        if (!node) return;
+        bool enabled = false;
+        if (node["enable"]) enabled = node["enable"].as<bool>();
+        else if (node["isuseimu"]) enabled = node["isuseimu"].as<bool>(); // backward compat
+        if (!enabled) return;
+        if (!node["file"]) { std::cout << "IMU('" << dst.name << "') enabled but missing file" << std::endl; return; }
+        std::string path = node["file"].as<std::string>();
+        int cols = 7; if (node["columns"]) cols = node["columns"].as<int>(); else if (node["datalen"]) cols = node["datalen"].as<int>();
+        int rate = imudatarate; if (node["rate_hz"]) rate = node["rate_hz"].as<int>(); else if (node["rate"]) rate = node["rate"].as<int>();
+        dst.loader = std::make_unique<ImuFileLoader>(path, cols, rate);
+        if (!dst.loader->isOpen()) { std::cout << "Failed to open IMU('" << dst.name << "'): " << path << std::endl; dst.loader.reset(); return; }
+        if (node["extrinsic_deg"]) { auto a = node["extrinsic_deg"].as<std::vector<double>>(); if (a.size()==3) dst.extrinsic_angle = Vector3d(a.data())*D2R; }
+        else if (node["rbw_deg"]) { auto a = node["rbw_deg"].as<std::vector<double>>(); if (a.size()==3) dst.extrinsic_angle = Vector3d(a.data())*D2R; }
+        if (node["lever_m"]) { auto lv = node["lever_m"].as<std::vector<double>>(); if (lv.size()==3) dst.lever = Vector3d(lv.data()); }
+        if (dst.is_wheel) {
+            if (node["gyro_share"]) { auto gs = node["gyro_share"]; if (gs["sigma_radps"]) dst.gyro_sigma = gs["sigma_radps"].as<double>(); if (gs["huber_delta"]) dst.huber_delta = gs["huber_delta"].as<double>(); if (gs["rbw_prior_sigma_deg"]) dst.rbw_prior_sigma_rad = gs["rbw_prior_sigma_deg"].as<double>()*D2R; }
+            if (node["att_share"]) { auto as = node["att_share"]; if (as["sigma_deg"]) dst.att_sigma_rad = as["sigma_deg"].as<double>()*D2R; if (as["huber_delta"]) dst.att_huber_delta = as["huber_delta"].as<double>(); }
         }
-        if (!node["isuseimu"] || !node["isuseimu"].as<bool>()) {
-            return false;
-        }
-        if (!node["file"]) {
-            std::cout << "Config block '" << key << "' enabled but missing file entry" << std::endl;
-            return false;
-        }
-        if (!active_imu_label.empty()) {
-            std::cout << "Multiple IMU sources enabled; keeping '" << active_imu_label << "' and ignoring '" << key << "'" << std::endl;
-            return false;
-        }
-        imupath = node["file"].as<std::string>();
-        if (node["datalen"]) {
-            imudatalen = node["datalen"].as<int>();
-        }
-        if (node["rate"]) {
-            imudatarate = node["rate"].as<int>();
-        }
-        active_imu_label = key;
-        return true;
+        dst.enabled = true;
     };
 
-    configureImuFromBlock("imu_main");
-    configureImuFromBlock("wheel_imu");
-
-    if (imupath.empty()) {
-        std::cout << "配置文件中未启用任何 IMU 数据源，请检查 imu_main / wheel_imu 区块。" << std::endl;
-        return -1;
+    // new schema
+    load_imu_node(config["imu_main"], imu_main);
+    load_imu_node(config["wheel_imu_left"], imu_left);
+    load_imu_node(config["wheel_imu_right"], imu_right);
+    // backward compat: single wheel_imu
+    if (!imu_left.enabled && config["wheel_imu"]) {
+        std::cout << "[Warning] 'wheel_imu' is deprecated. Please use 'wheel_imu_left/right'." << std::endl;
+        load_imu_node(config["wheel_imu"], imu_left);
+        imu_left.name = "left"; imu_left.is_wheel = true;
     }
+
+    std::vector<ImuSource*> active_imus; if (imu_main.enabled) active_imus.push_back(&imu_main); if (imu_left.enabled) active_imus.push_back(&imu_left); if (imu_right.enabled) active_imus.push_back(&imu_right);
+    if (active_imus.empty()) { std::cout << "配置文件未启用任何 IMU（imu_main / wheel_imu_left / wheel_imu_right）。" << std::endl; return -1; }
+    ImuSource *driver = imu_main.enabled? &imu_main : (imu_left.enabled? &imu_left : &imu_right);
 
     // Consider Earth's rotation in mechanization (Coriolis and Earth-rate effects)
     // Affects preintegration dynamics if true
     bool isearth = config["isearth"].as<bool>();
 
     GnssFileLoader gnssfile(gnsspath);
-    ImuFileLoader imufile(imupath, imudatalen, imudatarate);
     FileSaver navfile(outputpath + "/OB_GINS_TXT.nav", 11, FileSaver::TEXT);
     FileSaver errfile(outputpath + "/OB_GINS_IMU_ERR.bin", 7, FileSaver::BINARY);
-    if (!imufile.isOpen() || !navfile.isOpen() || !navfile.isOpen() || !errfile.isOpen()) {
+    if (!navfile.isOpen() || !navfile.isOpen() || !errfile.isOpen()) {
         std::cout << "Failed to open data file" << std::endl;
         return -1;
     }
@@ -216,11 +234,7 @@ int main(int argc, char *argv[]) {
 
         // 优先从启用的 IMU 区块(imu_main / wheel_imu)下的 imumodel 读取；没有则回退到全局 imumodel；再没有则用默认值。
     YAML::Node imu_model;
-    if (!active_imu_label.empty()) {
-        YAML::Node sel = config[active_imu_label.c_str()];
-        if (sel && sel["imumodel"]) imu_model = sel["imumodel"];
-    }
-    if (!imu_model && config["imumodel"]) {
+    if (config["imumodel"]) {
         imu_model = config["imumodel"];
     }
 
@@ -254,8 +268,8 @@ int main(int argc, char *argv[]) {
     // Ensures values come from YAML instead of hard-coded defaults when provided.
     {
         YAML::Node imu_model_fix;
-        if (!active_imu_label.empty()) {
-            YAML::Node sel = config[active_imu_label.c_str()];
+        if (driver) {
+            YAML::Node sel = config[driver==&imu_main?"imu_main":(driver==&imu_left?"wheel_imu_left":"wheel_imu_right")];
             if (sel && sel["imumodel"]) imu_model_fix = sel["imumodel"];
         }
         if ((!imu_model_fix || !imu_model_fix.IsDefined()) && config["imumodel"]) {
@@ -357,40 +371,7 @@ int main(int argc, char *argv[]) {
     }
     bool has_odo_sources = !odo_sources.empty();
 
-    // Parse wheel IMU sources (optional left/right)
-    auto load_wheelimu_node = [&](const YAML::Node &node, const std::string &tag) {
-        WheelImuSource src;
-        src.name = tag;
-        if (!node || !node["enable"] || !node["enable"].as<bool>()) {
-            src.enabled = false; return src;
-        }
-        std::string path = node["file"] ? node["file"].as<std::string>() : "";
-        int cols = node["columns"] ? node["columns"].as<int>() : 7;
-        int rate = node["rate_hz"] ? node["rate_hz"].as<int>() : imudatarate;
-        if (path.empty()) { std::cout << "Wheel-IMU("<<tag<<") enabled but no file specified" << std::endl; return src; }
-        src.loader = std::make_unique<ImuFileLoader>(path, cols, rate);
-        if (!src.loader->isOpen()) { std::cout << "Failed to open wheel-IMU: "<<path<< std::endl; src.loader.reset(); return src; }
-        if (node["rbw_deg"]) {
-            auto a = node["rbw_deg"].as<std::vector<double>>(); if (a.size()==3) src.rbw_base = Vector3d(a.data()) * D2R;
-        }
-        if (node["gyro_share"]) {
-            auto gs = node["gyro_share"];
-            if (gs["sigma_radps"]) src.gyro_sigma = gs["sigma_radps"].as<double>();
-            if (gs["huber_delta"]) src.huber_delta = gs["huber_delta"].as<double>();
-            if (gs["rbw_prior_sigma_deg"]) src.rbw_prior_sigma_rad = gs["rbw_prior_sigma_deg"].as<double>()*D2R;
-        }
-        if (node["att_share"]) {
-            auto as = node["att_share"];
-            if (as["sigma_deg"]) src.att_sigma_rad = as["sigma_deg"].as<double>()*D2R;
-            if (as["huber_delta"]) src.att_huber_delta = as["huber_delta"].as<double>();
-        }
-        src.enabled = true; return src;
-    };
-
-    std::vector<WheelImuSource> wimu_sources;
-    if (config["wheel_imu_left"])  { auto s = load_wheelimu_node(config["wheel_imu_left"],  "left");  if (s.enabled) wimu_sources.push_back(std::move(s)); }
-    if (config["wheel_imu_right"]) { auto s = load_wheelimu_node(config["wheel_imu_right"], "right"); if (s.enabled) wimu_sources.push_back(std::move(s)); }
-    bool has_wimu_sources = !wimu_sources.empty();
+    // Wheel IMUs are parsed via unified ImuSource above
 
     // Global gates override (unified yaw/acc thresholds/scales)
     if (config["gates"]) {
@@ -502,12 +483,16 @@ int main(int argc, char *argv[]) {
     auto gnssthreshold = config["gnssthreshold"].as<double>();
 
     // Data alignment: advance IMU and GNSS streams to starttime
-    // Read until first sample >= starttime for each stream
-    IMU imu_cur, imu_pre;
-    do {
-        imu_pre = imu_cur;
-        imu_cur = imufile.next();
-    } while (imu_cur.time < starttime);
+    // For each active IMU, read until first sample >= starttime
+    for (auto *s : active_imus) {
+        if (!s->loader) continue;
+        s->curr = s->loader->next();
+        IMU last{};
+        while (s->curr.time < starttime && !s->loader->isEof()) {
+            last = s->curr; s->curr = s->loader->next();
+        }
+        if (last.time > 0) s->buffer.push_back(last);
+    }
 
     GNSS gnss;
     do {
@@ -525,15 +510,7 @@ int main(int argc, char *argv[]) {
             }
         }
     }
-    if (has_wimu_sources) {
-        for (auto &s : wimu_sources) {
-            if (!s.loader) continue;
-            s.curr = s.loader->next();
-            while (s.curr.time < starttime && !s.loader->isEof()) {
-                s.curr = s.loader->next();
-            }
-        }
-    }
+    // Wheel IMUs are aligned via unified ImuSource loop above
 
     // Initialize station origin (geodetic) and convert GNSS to local frame
     Vector3d station_origin = gnss.blh;
@@ -568,6 +545,9 @@ int main(int argc, char *argv[]) {
     };
     std::cout << "Initilization at " << gnss.time << " s " << std::endl;
 
+    // Initialize each IMU's independent state
+    for (auto *s : active_imus) s->state = state_curr;
+
     statelist[0]     = state_curr;
     statedatalist[0] = Preintegration::stateToData(state_curr, preintegration_options);
     gnsslist.push_back(gnss);
@@ -575,10 +555,18 @@ int main(int argc, char *argv[]) {
     double sow = round(gnss.time);
     timelist.push_back(sow);
 
-    // Initial preintegration: seed with current IMU sample and initial state
-    // Initial preintegration
-    preintegrationlist.emplace_back(
-        Preintegration::createPreintegration(parameters, imu_pre, state_curr, preintegration_options));
+    // Initial preintegration: seed with driver IMU sample and initial state
+    IMU drv_seed = driver->buffer.empty()? driver->curr : driver->buffer.back();
+    preintegrationlist.emplace_back(Preintegration::createPreintegration(parameters, drv_seed, state_curr, preintegration_options));
+    // Initialize each IMU's independent state
+    for (auto *s : active_imus) s->state = state_curr;
+    // Seed wheel IMU preintegrations for independence
+    for (auto *s : active_imus) {
+        if (s==driver) continue;
+        IMU seed = s->buffer.empty()? s->curr : s->buffer.back();
+        s->preint.clear();
+        s->preint.emplace_back(std::make_shared<PreintegrationWheel>(parameters, seed, s->state, s->extrinsic_angle, s->lever));
+    }
 
     // Read next GNSS epoch for subsequent steps
     gnss                = gnssfile.next();
@@ -592,8 +580,12 @@ int main(int argc, char *argv[]) {
     // Move to next integration node (advance target time by INTEGRATION_LENGTH)
     sow += INTEGRATION_LENGTH;
 
+    // Prepare driver IMU iteration variables
+    IMU imu_pre = drv_seed;
+    IMU imu_cur = driver->curr;
+
     while (true) {
-        if ((imu_cur.time > endtime) || imufile.isEof()) {
+        if ((imu_cur.time > endtime) || (driver->loader && driver->loader->isEof())) {
             break;
         }
 
@@ -609,8 +601,21 @@ int main(int argc, char *argv[]) {
 
         // No additional high-rate write here; nodes are now at INTEGRATION_LENGTH (e.g., 0.01s)
 
+        // Advance secondary IMUs up to driver's current time
+        for (auto *s : active_imus) {
+            if (s==driver || !s->loader) continue;
+            while (!s->loader->isEof() && s->curr.time <= imu_cur.time) {
+                s->buffer.push_back(s->curr);
+                if (!s->preint.empty()) s->preint.back()->addNewImu(s->curr);
+                s->curr = s->loader->next();
+            }
+            while (!s->buffer.empty() && s->buffer.front().time < timelist.front() - 0.5 * INTEGRATION_LENGTH) {
+                s->buffer.pop_front();
+            }
+        }
+
         imu_pre = imu_cur;
-        imu_cur = imufile.next();
+        imu_cur = driver->loader->next();
 
         if (imu_cur.time > sow) {
             // On GNSS epoch: add GNSS measurement and fetch next fix
@@ -651,7 +656,7 @@ int main(int argc, char *argv[]) {
                 preintegrationlist.back()->addNewImu(imu_cur);
 
                 imu_pre = imu_cur;
-                imu_cur = imufile.next();
+                imu_cur = driver->loader->next();
             } else if (isneed == 2) {
                 imuInterpolation(imu_cur, imu_pre, imu_cur, sow);
                 preintegrationlist.back()->addNewImu(imu_pre);
@@ -988,79 +993,51 @@ int main(int argc, char *argv[]) {
                     }
                 }
 
-                // Wheel-IMU gyro/att share factors (per-source; works with one or both sources)
-                if (has_wimu_sources) {
+                // Wheel-IMU gyro/att share factors via unified IMU sources
+                {
                     const int mix_dim = Preintegration::numMixParameter(preintegration_options);
-                    for (auto &s : wimu_sources) {
-                        if (!s.loader) continue;
-                        // advance buffer
-                        while (!s.loader->isEof() && s.curr.time <= *timelist.rbegin()) {
-                            s.buffer.push_back(s.curr);
-                            s.curr = s.loader->next();
-                        }
-                        while (!s.buffer.empty() && s.buffer.front().time < timelist.front() - 0.5 * INTEGRATION_LENGTH) {
-                            s.buffer.pop_front();
-                        }
-                        // small-angle parameter for extrinsic delta with prior
+                    for (auto *sp : active_imus) {
+                        if (!sp->is_wheel || !sp->loader) continue;
+                        // small-angle extrinsic delta with prior
                         static std::unordered_map<std::string, std::array<double,3>> rbw_param_map;
-                        if (!rbw_param_map.count(s.name)) rbw_param_map[s.name] = {0.0,0.0,0.0};
-                        auto &rbw_param = rbw_param_map[s.name];
+                        if (!rbw_param_map.count(sp->name)) rbw_param_map[sp->name] = {0.0,0.0,0.0};
+                        auto &rbw_param = rbw_param_map[sp->name];
                         problem.AddParameterBlock(rbw_param.data(), 3);
-                        problem.AddResidualBlock(new AnglesPriorFactor(s.rbw_prior_sigma_rad), nullptr, rbw_param.data());
+                        problem.AddResidualBlock(new AnglesPriorFactor(sp->rbw_prior_sigma_rad), nullptr, rbw_param.data());
 
-                        ceres::LossFunction *gs_loss = new ceres::HuberLoss(s.huber_delta);
-                        ceres::LossFunction *as_loss = new ceres::HuberLoss(s.att_huber_delta);
-                        for (const auto &m : s.buffer) {
+                        ceres::LossFunction *gs_loss = new ceres::HuberLoss(sp->huber_delta);
+                        ceres::LossFunction *as_loss = new ceres::HuberLoss(sp->att_huber_delta);
+                        for (const auto &m : sp->buffer) {
                             if (m.time < timelist.front() - MINIMUM_INTERVAL || m.time > timelist.back() + MINIMUM_INTERVAL) continue;
                             // nearest node index
                             size_t nearest = 0; double best = 1e9;
-                            for (size_t i = 0; i < timelist.size(); ++i) {
-                                double d = fabs(m.time - timelist[i]); if (d < best) { best = d; nearest = i; }
-                            }
-                            // omega_body at m.time
+                            for (size_t i = 0; i < timelist.size(); ++i) { double d = fabs(m.time - timelist[i]); if (d < best) { best = d; nearest = i; } }
+                            // omega_body at m.time from driver IMU
                             Vector3d omega_b = Vector3d::Zero();
                             for (size_t ii = 1; ii < imuqueue.size(); ++ii) {
-                                if (imuqueue[ii - 1].time <= m.time && imuqueue[ii].time >= m.time) {
-                                    double dt = std::max(imuqueue[ii].dt, 1e-6);
-                                    omega_b = imuqueue[ii].dtheta / dt; break;
-                                }
+                                if (imuqueue[ii - 1].time <= m.time && imuqueue[ii].time >= m.time) { double dt = std::max(imuqueue[ii].dt, 1e-6); omega_b = imuqueue[ii].dtheta / dt; break; }
                             }
                             if (omega_b.isZero(0)) omega_b = (omega_nodes.size()>nearest)? omega_nodes[nearest]:Vector3d::Zero();
-                            // omega_wheel from wheel IMU increment
+                            // wheel omega
                             double dtw = std::max(m.dt, 1e-6);
                             Vector3d omega_w = m.dtheta / dtw;
-
-                            // gates: reuse ya w/acc thresholds for sigma scaling
+                            // gating
                             Vector3d acc_b = Vector3d::Zero();
-                            for (size_t ii = 1; ii < imuqueue.size(); ++ii) {
-                                if (imuqueue[ii - 1].time <= m.time && imuqueue[ii].time >= m.time) {
-                                    double dt = std::max(imuqueue[ii].dt, 1e-6);
-                                    acc_b = imuqueue[ii].dvel / dt; break;
-                                }
-                            }
-                            double sigma = s.gyro_sigma;
+                            for (size_t ii = 1; ii < imuqueue.size(); ++ii) { if (imuqueue[ii - 1].time <= m.time && imuqueue[ii].time >= m.time) { double dt = std::max(imuqueue[ii].dt, 1e-6); acc_b = imuqueue[ii].dvel / dt; break; } }
+                            double sigma = sp->gyro_sigma;
                             if (fabs(omega_b.z()) > odo_yaw_rate_thresh) sigma *= odo_yaw_rate_scale;
                             if (acc_b.norm() > odo_accel_thresh) sigma *= odo_accel_scale;
 
-                            auto f = new GyroShareFactor(omega_b, omega_w, s.rbw_base, sigma, mix_dim);
+                            auto f = new GyroShareFactor(omega_b, omega_w, sp->extrinsic_angle, sigma, mix_dim);
                             problem.AddResidualBlock(f, gs_loss, statedatalist[nearest].mix, rbw_param.data());
 
-                            // Attitude share: integrate wheel IMU orientation and match body orientation via extrinsics
-                            // Initialize q_est at first seen sample to predicted orientation (Rwb_base * R_body)
-                            if (!s.q_inited) {
-                                Eigen::Quaterniond q_body(statedatalist[nearest].pose[6],
-                                                          statedatalist[nearest].pose[3],
-                                                          statedatalist[nearest].pose[4],
-                                                          statedatalist[nearest].pose[5]);
-                                Eigen::Matrix3d Rbw = Rotation::euler2matrix(s.rbw_base);
-                                Eigen::Matrix3d Rwb = Rbw.transpose();
-                                s.q_est = Rotation::matrix2quaternion(Rwb * q_body.toRotationMatrix());
-                                s.q_inited = true;
+                            if (!sp->q_inited) {
+                                Eigen::Quaterniond q_body(statedatalist[nearest].pose[6], statedatalist[nearest].pose[3], statedatalist[nearest].pose[4], statedatalist[nearest].pose[5]);
+                                Eigen::Matrix3d Rbw = Rotation::euler2matrix(sp->extrinsic_angle); Eigen::Matrix3d Rwb = Rbw.transpose();
+                                sp->q_est = Rotation::matrix2quaternion(Rwb * q_body.toRotationMatrix()); sp->q_inited = true;
                             }
-                            // integrate wheel delta angle
-                            Eigen::Quaterniond dq = Rotation::rotvec2quaternion(m.dtheta);
-                            s.q_est = s.q_est * dq;
-                            auto as = new AttShareFactor(s.q_est, s.rbw_base, s.att_sigma_rad);
+                            Eigen::Quaterniond dq = Rotation::rotvec2quaternion(m.dtheta); sp->q_est = sp->q_est * dq;
+                            auto as = new AttShareFactor(sp->q_est, sp->extrinsic_angle, sp->att_sigma_rad);
                             problem.AddResidualBlock(as, as_loss, statedatalist[nearest].pose, rbw_param.data());
                         }
                     }
@@ -1224,6 +1201,13 @@ int main(int argc, char *argv[]) {
             // build a new preintegration object
             preintegrationlist.emplace_back(
                 Preintegration::createPreintegration(parameters, imu_pre, state_curr, preintegration_options));
+            // also start new segments for secondary IMUs
+            for (auto *s : active_imus) {
+                if (s==driver) continue;
+                s->state = Preintegration::stateFromData(statedatalist[preintegrationlist.size()-1], preintegration_options);
+                IMU seed = s->curr;
+                s->preint.emplace_back(std::make_shared<PreintegrationWheel>(parameters, seed, s->state, s->extrinsic_angle, s->lever));
+            }
         } else {
             auto integration = *preintegrationlist.rbegin();
             writeNavResult(integration->endTime(), station_origin, integration->currentState(), navfile, errfile);
@@ -1232,7 +1216,8 @@ int main(int argc, char *argv[]) {
 
     navfile.close();
     errfile.close();
-    imufile.close();
+    // Close IMU files
+    for (auto *s : active_imus) { if (s->loader) s->loader->close(); }
     gnssfile.close();
 
     auto te = absl::Now();

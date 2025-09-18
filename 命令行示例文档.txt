@@ -1,0 +1,2 @@
+运行对比图
+python OB_GINS/tools/compare_nav_truth.py -n "D:/Code/OB_GINS/dataset/wheel-ins2_dataset/converted/out/C1/OB_GINS_TXT.nav" -t "D:/Code/OB_GINS/dataset/wheel-ins2_dataset/converted/C1/Ground Truth/GINS_all.pos" -o "D:/Code/OB_GINS/dataset/wheel-ins2_dataset/converted/out/C1/nav_truth_xyz_latest_release.csv" -p "D:/Code/OB_GINS/dataset/wheel-ins2_dataset/converted/out/C1/nav_truth_xyz_latest_release.png"
