@@ -5,6 +5,8 @@ out/
 build/
 build_debug/
 build_release/
+build_nmake_debug/
+build_nmake_release/
 cmake-build-*/
 
 # Visual Studio / MSBuild
@@ -29,6 +31,9 @@ Testing/
 dataset/liu/
 dataset/*IMU_ERR*
 dataset/*.nav
+dataset/robot/
+dataset/wheel-ins2_dataset/
+wheel-ins2_dataset/
 
 # Misc
 *.bak

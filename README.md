@@ -39,6 +39,14 @@ English version: “The authors would like to acknowledge Dr. Xiaoji Niu and the
 
 ## 1 Prerequisites
 
+## Branch Status (2025-09)
+
+- Multi‑IMU navigation: current code supports running three IMU sources in parallel — `imu_main`, `wheel_imu_left`, and `wheel_imu_right` — via a unified IMU container and driver‑timeline alignment.
+- Wheel‑IMU accuracy: functional but still under active tuning (lever/extrinsic handling, gating, and share factors). Expect further improvements.
+- Branch workflow:
+  - `main`: synchronized with the latest working features (includes multi‑IMU capability).
+  - `Only-Wheel`: active development branch focusing on wheel‑IMU modeling and performance. Further improvements will continue here.
+
 ### 1.1 System and compiler
 
 We recommend you use Ubuntu 18.04 or Ubuntu 20.04 with the newest compiler (**gcc>=8.0** or **clang>=6.0**).

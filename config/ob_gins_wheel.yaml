@@ -1,33 +1,17 @@
-imu_main:
-  enable: true
+﻿imu_main:
+  isuseimu: true
   file: "D:/Code/OB_GINS/dataset/robot/Body-IMU/C1_imu_increments.txt"
-  columns: 7
-  rate_hz: 200
-  imumodel:
-    arw: 0.24
-    vrw: 0.24
-    gbstd: 50.0
-    abstd: 250.0
-    corrtime: 1.0
+  datalen: 7
+  rate: 200
 
-wheel_imu_left:
-  enable: false
+wheel_imu:
+  isuseimu: true
   file: "D:/Code/OB_GINS/dataset/robot/Wheel-IMU/C1_imu_increments.txt"
-  columns: 7
-  rate_hz: 200
-  extrinsic_deg: [0,0,0]
-  lever_m: [0,0,0]
-  # optional share factors
-  gyro_share:
-    sigma_radps: 0.03
-    huber_delta: 1.0
-    rbw_prior_sigma_deg: 3.0
-  att_share:
-    sigma_deg: 2.0
-    huber_delta: 1.0
+  datalen: 7
+  rate: 200
 
 gnssfile: "D:/Code/OB_GINS/dataset/robot/Ground Truth/GINS_all.pos"
-outputpath: "D:/Code/OB_GINS/dataset/robot/out_robot"
+outputpath: "D:/Code/OB_GINS/dataset/robot/out_robot_wheel"
 
 windows: 30
 starttime: 132000
@@ -41,14 +25,20 @@ initatt: [0,0,276]
 initgb: [0,0,0]
 initab: [0,0,0]
 
-# legacy defaults (kept for compatibility, not needed for new blocks)
-# imudatalen: 7
-# imudatarate: 200
+imudatalen: 7
+imudatarate: 200
 isearth: true
 
 antlever: [ -0.073, 0.302, 0.087 ]
 odolever: [ -0.64, -0.628, 2.122 ]
 bodyangle: [ 0, -0.30, -1.09 ]
+
+odometer:
+  isuseodo: false
+  std: [0.05,0.05,0.05]
+  srw: 100
+  factor:
+    use_nhc: false
 
 odometer_left:
   isuseodo: false
@@ -76,21 +66,24 @@ odometer:
     use_nhc: true
     nhc_sigma: 0.1
     nhc_huber_delta: 0.5
-# global fallback imumodel (used if per-IMU not provided)
 imumodel:
   arw: 0.24
   vrw: 0.24
   gbstd: 50.0
   abstd: 250.0
   corrtime: 1.0
-# GNSS仿真中断配置
+# GNSS浠跨湡涓柇閰嶇疆
 # GNSS outage parameters
 isuseoutage: false
 outagetime: 0
 outagelen: 60
 outageperiod: 180
 
-# 固定阈值GNSS抗差 (m), 需要根据数据的实际情况调整
+# 鍥哄畾闃堝€糋NSS鎶楀樊 (m), 闇€瑕佹牴鎹暟鎹殑瀹為檯鎯呭喌璋冩暣
 # a fixed threshold for GNSS outlier-culling using positioning standard deviation
 # must be set according to your own dataset
 gnssthreshold: 20.0
+gnss_factor:
+  use_robust: true
+  huber_delta: 1.0
+

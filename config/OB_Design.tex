@@ -1,0 +1,176 @@
+\documentclass[11pt]{article}
+% ==== 基本编码与中文支持 ====
+\usepackage[UTF8]{ctex} % 兼容 XeLaTeX / pdfLaTeX，处理中文
+% ==== 页面与常用宏包 ====
+\usepackage[a4paper,margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsfonts,bm}
+\usepackage{mathtools}
+\usepackage{physics}        % 可选：用于 \norm,\dv 等
+\usepackage{siunitx}        % 单位
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!60!black,
+  urlcolor=blue!60!black,
+  citecolor=blue!60!black
+}
+% ==== 常用记号 ====
+\newcommand{\Log}{\mathrm{Log}}          % SO(3)李代数对数映射
+\newcommand{\SO}{\mathrm{SO}(3)}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\ang}[1]{#1^{\circ}}
+\DeclareMathOperator{\diag}{diag}
+
+\title{主 IMU + 轮式 IMU + GNSS 因子图整体设计（可直接集成到 OB\_GINS + Wheel-INS 框架）}
+\author{ }
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\section{状态定义与坐标约定}
+\subsection*{坐标与旋转约定}
+\begin{itemize}
+  \item 世界系 $n$：局部 ENU。
+  \item 车体系 $b$（主 IMU）：FRD（前/右/下）。
+  \item 轮式 IMU 系 $w$：RBD（右/后/下）。
+  \item 四元数 $q^{nb}$ 表示 $b\to n$ 主动旋转，旋转矩阵 $R(q^{nb})\in\SO$；$R(q^{nb})^\top$ 为 $n\to b$。
+  \item 轮式 IMU 与车体的固定外参：$R_b^{w}$（$w\to b$）与杆臂 $l_{b\to w}^b$（在 $b$ 坐标表达）。
+  \item 若轮 IMU 与主 IMU 航向相差 $\ang{90}$，可在外参中显式包含 $R_z(\ang{90})$：$R_b^{w} = R_b^{w,\text{calib}}\cdot R_z(\ang{90})$。
+\end{itemize}
+
+\subsection*{滑窗状态（每个关键帧 $k$）}
+\begin{align*}
+x_k &= \{\,p^n,\, v^n,\, q^{nb},\, b_g^{(0)},\, b_a^{(0)}\,\},\\
+x_k^{(L)} &= \{\,p_{w_L}^n,\, v_{w_L}^n,\, q^{nw_L},\, b_g^{(L)},\, b_a^{(L)}\,\},\\
+x_k^{(R)} &= \{\,p_{w_R}^n,\, v_{w_R}^n,\, q^{nw_R},\, b_g^{(R)},\, b_a^{(R)}\,\}.
+\end{align*}
+全局（慢变量/常参）可选估计量：
+\[
+\Delta \theta_b^{w_L},\, \Delta \theta_b^{w_R}\in\R^3,\quad
+\delta l_{b\to w_L}^b,\, \delta l_{b\to w_R}^b\in\R^3,\quad
+s_L, s_R\in\R,\quad b\in\R.
+\]
+
+\section{主 IMU 预积分因子（含地转/重力变化）}
+采用改进预积分（如 \textit{Tang 2022}, \textit{Jiang 2020}），在 $(k\to k+1)$ 上形成观测 $\Delta\hat{\alpha},\Delta\hat{\beta},\Delta\hat{q}$。
+\begin{equation}
+r_{\mathrm{IMU}}=
+\begin{bmatrix}
+R(q_k^{nb})^\top\!\big(p_{k+1}^n - p_k^n - v_k^n \Delta t + \tfrac{1}{2} g^n \Delta t^2\big) - \Delta\hat{\alpha}\\[2pt]
+R(q_k^{nb})^\top\!\big(v_{k+1}^n - v_k^n + g^n \Delta t\big) - \Delta\hat{\beta}\\[2pt]
+\Log\!\big( (q_k^{nb})^{-1} q_{k+1}^{nb} \otimes (\Delta\hat{q})^{-1} \big)
+\end{bmatrix}.
+\end{equation}
+
+\section{轮 IMU 预积分因子（独立 DR，含杆臂动力学）}
+对每个轮 IMU（左/右）独立进行预积分。轮处等效比力需包含刚体项（切向/向心）：
+\begin{equation}
+f_{w}^b = f_O^b + \dot{\omega}^b \times \big(l^b + \delta l^b\big)
++ \omega^b \times \Big(\omega^b \times \big(l^b + \delta l^b\big)\Big),
+\end{equation}
+该 $f_{w}^b$ 用于构造轮-INS 预积分的离散模型，从而影响 $\Delta\hat{\beta}_w,\Delta\hat{\alpha}_w$ 残差。
+
+\section{轮速（切向速度一致）因子}
+由轮 IMU 陀螺在旋转轴的分量乘半径（或尺度）得到切向速度观测，形成一维残差：
+\begin{equation}
+r_v = t_w^\top \left( R(q^{nb})^\top v^n + \omega^b \times \big(l^b + \delta l^b\big) \right) - s\,\hat v,
+\quad
+t_w = R_b^{w}\, e_{\mathrm{tan}},\ \ e_{\mathrm{tan}}=x_w.
+\end{equation}
+对杆臂误差的雅可比：$\displaystyle \frac{\partial r_v}{\partial \delta l} = t_w^\top [\,\omega^b\,]_\times$。
+
+\section{非完整约束（NHC）因子}
+约束接触点速度在 $b$ 系的侧向/垂向分量近零（两维残差）：
+\begin{equation}
+r_{\mathrm{NHC}} =
+\begin{bmatrix}
+\big(R(q^{nb})^\top v^n + \omega^b \times (l^b + \delta l^b)\big)_y \\
+\big(R(q^{nb})^\top v^n + \omega^b \times (l^b + \delta l^b)\big)_z
+\end{bmatrix}
+\approx \bm{0}.
+\end{equation}
+
+\section{差分航向因子（双轮可用）}
+利用左右轮切向速度差估计偏航角速度并与主 IMU 一致：
+\begin{equation}
+r_{\Delta\omega} = \frac{\hat v_R - \hat v_L}{b} - \omega_z^b.
+\end{equation}
+
+\section{刚体耦合因子（建议：仅位置约束）}
+\subsection*{位置耦合}
+\begin{equation}
+r_{\mathrm{rigid\text{-}pos}} = p_{w}^n - \Big(p^n + R(q^{nb})\big(l^b + \delta l^b\big)\Big).
+\end{equation}
+姿态一致性由下节的跨 IMU 姿态共享因子提供（避免重复约束）。如需数值稳定，可在刚体因子内加入极弱的姿态正则（权重远小于姿态共享因子）。
+
+\section{跨 IMU 姿态/角速共享因子}
+由于 $R_b^{w}$ 已包含固定对准（如 $R_z(\ang{90})$），跨 IMU 耦合可直接作用于同一时刻的姿态与角速。
+
+\subsection*{姿态共享（att\_share）}
+\begin{equation}
+r_{\mathrm{att}} = \Log\!\Big( R(q^{nb})\, R_b^{w}\, R(q^{nw})^\top \Big).
+\end{equation}
+
+\subsection*{角速一致（gyro\_share）}
+\begin{equation}
+r_{\omega} = \Big(\omega^{(w)} - b_g^{(w)}\Big) - R_w^{b}\Big(\omega^{(0)} - b_g^{(0)}\Big),
+\qquad R_w^{b} = (R_b^{w})^\top.
+\end{equation}
+
+\section{外参与误差建模（先验与冻结解锁）}
+\begin{itemize}
+  \item 杆臂误差 $\delta l_{b\to w}^b \in \R^3$：加入状态，零均值高斯先验（典型 $\sigma\approx\SI{0.02}{m}$），在轮速/NHC/预积分中显式参与。
+  \item 外参增量角 $\Delta \theta_b^w \in \R^3$：估计右乘小角，先冻结 $30$--$60$\,s 后解锁；先验（典型 $\sigma\approx \ang{3}$）。
+  \item 陀螺/加计零偏 $b_g,b_a$：一阶 Gauss--Markov。
+  \item 时间偏置 $\Delta t_w$：首版可不估计；若跨 IMU 因子长期残差偏大，再开启估计并在共享因子处对主 IMU 姿态/角速做时间插值（姿态 Slerp，角速线性）。
+\end{itemize}
+
+\section{关键帧时间策略与边缘化}
+\begin{itemize}
+  \item 使用\textbf{公共关键帧时间轴}（以主 IMU 为基准，\SI{20}--\SI{100}{Hz}），主/左右轮 IMU 各自将原始采样预积分到相邻关键帧。
+  \item GNSS/里程计/NHC/跨 IMU 因子对齐到同一关键帧，条件数更好；滑窗边缘化按常规 Schur/先验更新实现。
+\end{itemize}
+
+\section{因子汇总表}
+\begin{center}
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{@{}p{3.2cm} p{9.6cm}@{}}
+\toprule
+因子 & 残差形式/要点 \\
+\midrule
+主 IMU 预积分
+& $\big(\Delta \alpha,\Delta \beta,\Delta \theta\big)$；含地球自转与重力变化补偿。\\
+轮 IMU 预积分
+& $\big(\Delta \alpha_w,\Delta \beta_w,\Delta \theta_w\big)$；$f_w^b$ 含 $\dot\omega\times(l+\delta l)$ 与 $\omega\times(\omega\times(l+\delta l))$。\\
+轮速（切向速度）
+& $r_v = t_w^\top\!\big(R^\top v^n + \omega^b \times (l+\delta l)\big) - s\,\hat v$；$\partial r_v/\partial \delta l = t_w^\top [\omega]_\times$。\\
+NHC（两维）
+& $r_{\mathrm{NHC}}=\big[(R^\top v^n + \omega\times(l+\delta l))_y,\ (\,\cdot\,)_z\big]^\top \approx 0$；打滑/强机动降权或关停。\\
+差分航向
+& $r_{\Delta\omega} = (\hat v_R - \hat v_L)/b - \omega_z^b$；抑制偏航漂移。\\
+刚体位置
+& $r_{\mathrm{rigid\text{-}pos}} = p_w^n - \big(p^n + R(q^{nb})(l+\delta l)\big)$；姿态交由共享因子。\\
+姿态共享
+& $r_{\mathrm{att}} = \Log\!\big(R(q^{nb})R_b^{w}R(q^{nw})^\top\big)$；提供跨 IMU 姿态锚点。\\
+角速共享
+& $r_{\omega} = (\omega^{(w)}-b_g^{(w)}) - R_w^{b}(\omega^{(0)}-b_g^{(0)})$；提升轮 IMU 陀螺偏置可辨识性。\\
+外参/杆臂先验
+& 对 $\Delta \theta_b^w,\ \delta l_{b\to w}^b$ 施加零均值弱先验；外参先冻结后解锁。\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{参考文献（文本列举）}
+\begin{itemize}
+  \item Tang et al., \emph{Impact of the Earth rotation compensation on MEMS-IMU preintegration}, 2022.
+  \item Jiang et al., \emph{Improved IMU preintegration with gravity change and Earth rotation for optimization-based GNSS/VINS}, 2020.
+  \item Niu et al., \emph{Wheel-INS: A Wheel-Mounted MEMS IMU-Based Dead Reckoning System}, IEEE T-VT, 2021.
+  \item Wu et al., \emph{Wheel-INS2: Multiple MEMS IMU-Based Dead Reckoning System with Different Configurations for Wheeled Robots}, IEEE T-ITS, 2023.
+\end{itemize}
+
+\end{document}
