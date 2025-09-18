@@ -1,5 +1,5 @@
 imu_main:
-  enable: false
+  enable: true
   file: "D:/Code/OB_GINS/dataset/wheel-ins2_dataset/converted/C1/Body-IMU/C1_imu_increments.txt"
   columns: 7
   rate_hz: 200
@@ -17,6 +17,7 @@ wheel_imu_left:
   rate_hz: 200
   extrinsic_deg: [0, 0, -3.43]
   lever_m: [0.0, -0.2, 0.0]
+  antlever: [4.0, -0.047, -0.5]
   gyro_share:
     sigma_radps: 0.03
     huber_delta: 1.0
@@ -26,12 +27,13 @@ wheel_imu_left:
     huber_delta: 1.0
 
 wheel_imu_right:
-  enable: false
+  enable: true
   file: "D:/Code/OB_GINS/dataset/wheel-ins2_dataset/converted/C1/Wheel-IMU-Right/C1_imu_increments.txt"
   columns: 7
   rate_hz: 200
   extrinsic_deg: [0, 0, -3.43]
   lever_m: [0.0, 0.2, 0.0]
+  antlever: [0.0, -0.047, -0.5]
   gyro_share:
     sigma_radps: 0.03
     huber_delta: 1.0
@@ -62,7 +64,7 @@ isearth: true
 
 antlever: [0,0,0]
 odolever: [0,0,0]
-bodyangle: [0,0,0]
+bodyangle: [0, -3.38, 0]
 
 # global fallback for imumodel (used if per-IMU not supplied)
 imumodel:
