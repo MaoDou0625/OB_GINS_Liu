@@ -31,9 +31,10 @@ Testing/
 dataset/liu/
 dataset/*IMU_ERR*
 dataset/*.nav
-dataset/robot/
-dataset/wheel-ins2_dataset/
-wheel-ins2_dataset/
+# Allow datasets to be versioned via Git LFS (see .gitattributes)
+# dataset/robot/
+# dataset/wheel-ins2_dataset/
+# wheel-ins2_dataset/
 
 # Misc
 *.bak
