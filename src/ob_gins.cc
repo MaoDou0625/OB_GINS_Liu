@@ -109,6 +109,30 @@ struct ImuSource {
     bool q_inited = false;
 };
 
+// Multi-chain container: fixed-size state memory + per-chain preintegration
+struct Chain {
+    std::string name;
+    bool enabled = false;
+    bool is_wheel = false;
+    bool initialized = false;
+
+    // Pointers to underlying IO/preintegration
+    ImuSource *imu = nullptr; // non-owning
+    std::deque<std::shared_ptr<PreintegrationBase>> *preints = nullptr; // non-owning (main uses `preintegrationlist`)
+
+    // Mounting/extrinsics and per-chain params
+    Vector3d bodyangle = Vector3d::Zero(); // IMU->vehicle [rad]
+    Vector3d antlever  = Vector3d::Zero(); // body->GNSS antenna [m]
+    Vector3d rbw       = Vector3d::Zero(); // wheel-imu extrinsic (rad)
+    Vector3d lever     = Vector3d::Zero(); // wheel lever arm [m]
+
+    std::shared_ptr<IntegrationParameters> params; // cloned from base
+
+    // Fixed-size parameter memory (windows+1), addresses must remain stable
+    std::vector<IntegrationState>     states;     // size = windows+1
+    std::vector<IntegrationStateData> statedata;  // size = windows+1
+};
+
 int main(int argc, char *argv[]) {
 
     if (argc != 2) {
@@ -333,6 +357,46 @@ int main(int argc, char *argv[]) {
     parameters->lodo    = odolever;
     // Mechanization chain uses driver IMU's bodyangle
     parameters->abv     = driver->bodyangle;
+
+    // ========== Build multi-chain descriptors (no residuals yet) ==========
+    Chain chain_main, chain_left, chain_right;
+    chain_main.name     = "main";  chain_main.enabled = imu_main.enabled && (imu_main.loader!=nullptr); chain_main.is_wheel = false; chain_main.imu = &imu_main;
+    chain_left.name     = "left";  chain_left.enabled = imu_left.enabled && (imu_left.loader!=nullptr); chain_left.is_wheel = true;  chain_left.imu = &imu_left;
+    chain_right.name    = "right"; chain_right.enabled= imu_right.enabled&& (imu_right.loader!=nullptr); chain_right.is_wheel= true;  chain_right.imu = &imu_right;
+
+    auto fill_mount = [&](Chain &C){
+        if (!C.imu) return;
+        C.bodyangle = C.imu->bodyangle;
+        C.antlever  = C.imu->antlever;
+        C.rbw       = C.imu->extrinsic_angle;
+        C.lever     = C.imu->lever;
+    };
+    fill_mount(chain_main); fill_mount(chain_left); fill_mount(chain_right);
+
+    // Clone base parameters per chain and inject abv from that chain's bodyangle Y/Z
+    auto make_params = [&](const Chain &C){
+        auto p = std::make_shared<IntegrationParameters>(*parameters);
+        // abv = [0, bodyangle[Y], bodyangle[Z]] in our definition (only Y/Z used)
+        p->abv = Vector3d(0.0, C.bodyangle[1], C.bodyangle[2]);
+        return p;
+    };
+    if (chain_main.enabled)  chain_main.params  = make_params(chain_main);
+    if (chain_left.enabled)  chain_left.params  = make_params(chain_left);
+    if (chain_right.enabled) chain_right.params = make_params(chain_right);
+
+    // Fixed-size parameter memory for each enabled chain (windows+1), later仅覆盖，不改变容量
+    auto init_chain_mem = [&](Chain &C){ if (C.enabled) { C.states.resize(windows + 1); C.statedata.resize(windows + 1); } };
+    init_chain_mem(chain_main); init_chain_mem(chain_left); init_chain_mem(chain_right);
+
+    // Link preintegration containers for wheel chains to their ImuSource deques now
+    if (chain_left.enabled)  chain_left.preints  = &imu_left.preint;
+    if (chain_right.enabled) chain_right.preints = &imu_right.preint;
+
+    // List of all active chains (order: main, left, right)
+    std::vector<Chain*> active_chains;
+    if (chain_main.enabled)  active_chains.push_back(&chain_main);
+    if (chain_left.enabled)  active_chains.push_back(&chain_left);
+    if (chain_right.enabled) active_chains.push_back(&chain_right);
 
     // Parse odometer sources: support legacy `odometer` and per-wheel `odometer_left/right`
     YAML::Node odo_cfg = odo_root; // may be null if odometer block absent
@@ -565,6 +629,11 @@ int main(int argc, char *argv[]) {
     }
     Vector3d antlever_anchor = anchor? anchor->antlever : antlever;
 
+    // Map anchor ImuSource to Chain pointer for GNSS attachment
+    Chain* anchor_chain = &chain_main;
+    if (anchor == &imu_left)  anchor_chain = &chain_left;
+    if (anchor == &imu_right) anchor_chain = &chain_right;
+
     // Initial state at first integer-second GNSS (position, attitude, velocity, biases)
     // initialization
     IntegrationState state_curr = {
@@ -578,9 +647,12 @@ int main(int argc, char *argv[]) {
         .abv  = {driver->bodyangle[1], driver->bodyangle[2]},
     };
     std::cout << "Initilization at " << gnss.time << " s " << std::endl;
-
-    // Initialize each IMU's independent state
-    for (auto *s : active_imus) s->state = state_curr;
+    // Initialize per-chain state (anchor exact, others clone + abv only)
+    auto yz_of = [](const Vector3d &ang){ return Eigen::Vector2d(ang[1], ang[2]); };
+    IntegrationState anchor0 = state_curr; anchor0.abv = yz_of(anchor_chain->bodyangle);
+    if (chain_main.enabled)  { chain_main.states[0]  = anchor0; chain_main.states[0].abv  = yz_of(chain_main.bodyangle);  chain_main.statedata[0]  = Preintegration::stateToData(chain_main.states[0], preintegration_options);  chain_main.initialized  = true; }
+    if (chain_left.enabled)  { chain_left.states[0]  = anchor0; chain_left.states[0].abv  = yz_of(chain_left.bodyangle);  chain_left.statedata[0]  = Preintegration::stateToData(chain_left.states[0], preintegration_options);  chain_left.initialized  = true; }
+    if (chain_right.enabled) { chain_right.states[0] = anchor0; chain_right.states[0].abv = yz_of(chain_right.bodyangle); chain_right.statedata[0] = Preintegration::stateToData(chain_right.states[0], preintegration_options); chain_right.initialized = true; }
 
     statelist[0]     = state_curr;
     statedatalist[0] = Preintegration::stateToData(state_curr, preintegration_options);
@@ -592,14 +664,24 @@ int main(int argc, char *argv[]) {
     // Initial preintegration: seed with driver IMU sample and initial state
     IMU drv_seed = driver->buffer.empty()? driver->curr : driver->buffer.back();
     preintegrationlist.emplace_back(Preintegration::createPreintegration(parameters, drv_seed, state_curr, preintegration_options));
-    // Initialize each IMU's independent state
-    for (auto *s : active_imus) s->state = state_curr;
-    // Seed wheel IMU preintegrations for independence
+    // Link main chain to primary preintegration deque
+    if (chain_main.enabled) chain_main.preints = &preintegrationlist;
+    // Initialize each IMU's independent state from its chain
+    for (auto *s : active_imus) {
+        if (s==&imu_main && chain_main.enabled)      s->state = chain_main.states[0];
+        else if (s==&imu_left && chain_left.enabled) s->state = chain_left.states[0];
+        else if (s==&imu_right&& chain_right.enabled)s->state = chain_right.states[0];
+    }
+    // Seed wheel IMU preintegrations
     for (auto *s : active_imus) {
         if (s==driver) continue;
         IMU seed = s->buffer.empty()? s->curr : s->buffer.back();
         s->preint.clear();
-        s->preint.emplace_back(std::make_shared<PreintegrationWheel>(parameters, seed, s->state, s->extrinsic_angle, s->lever));
+        // Choose that wheel's chain initial state for seeding
+        IntegrationState s0 = state_curr;
+        if (s==&imu_left && chain_left.enabled)   s0 = chain_left.states[0];
+        if (s==&imu_right && chain_right.enabled) s0 = chain_right.states[0];
+        s->preint.emplace_back(std::make_shared<PreintegrationWheel>(parameters, seed, s0, s->extrinsic_angle, s->lever));
     }
 
     // Read next GNSS epoch for subsequent steps
@@ -701,10 +783,23 @@ int main(int argc, char *argv[]) {
             timelist.push_back(sow);
             sow += INTEGRATION_LENGTH;
 
-            // Push current integer-second state into sliding window buffers
+            // Push current integer-second state into sliding window buffers (main + wheel chains)
             state_curr                               = preintegrationlist.back()->currentState();
             statelist[preintegrationlist.size()]     = state_curr;
             statedatalist[preintegrationlist.size()] = Preintegration::stateToData(state_curr, preintegration_options);
+            // Update chain states at this node index
+            size_t node_idx = preintegrationlist.size();
+            if (chain_main.enabled)  { chain_main.states[node_idx]  = state_curr; chain_main.statedata[node_idx]  = Preintegration::stateToData(chain_main.states[node_idx], preintegration_options); }
+            if (chain_left.enabled && !imu_left.preint.empty())  {
+                IntegrationState sL = imu_left.preint.back()->currentState();
+                chain_left.states[node_idx]  = sL;
+                chain_left.statedata[node_idx] = Preintegration::stateToData(sL, preintegration_options);
+            }
+            if (chain_right.enabled && !imu_right.preint.empty()) {
+                IntegrationState sR = imu_right.preint.back()->currentState();
+                chain_right.states[node_idx]  = sR;
+                chain_right.statedata[node_idx] = Preintegration::stateToData(sR, preintegration_options);
+            }
             // Record angular velocity at this node (approximate)
             Vector3d omega_at_node = imu_pre.dtheta / std::max(imu_pre.dt, 1e-6);
             omega_nodes.push_back(omega_at_node);
@@ -723,16 +818,24 @@ int main(int argc, char *argv[]) {
                 options.linear_solver_type         = ceres::SPARSE_NORMAL_CHOLESKY;
                 options.num_threads                = 4;
 
-                // Add parameter blocks for each node in the window
-                // add parameter blocks
+                // Add parameter blocks for each node in the window (main + wheel chains)
+                // main chain (legacy arrays)
                 for (size_t k = 0; k <= preintegrationlist.size(); k++) {
-                    // Pose (position + quaternion orientation) manifold parameterization
                     ceres::Manifold *manifold = new PoseManifold();
                     problem.AddParameterBlock(statedatalist[k].pose, Preintegration::numPoseParameter(), manifold);
-
-                    problem.AddParameterBlock(statedatalist[k].mix,
-                                              Preintegration::numMixParameter(preintegration_options));
+                    problem.AddParameterBlock(statedatalist[k].mix, Preintegration::numMixParameter(preintegration_options));
                 }
+                // wheel chains
+                auto add_chain_params = [&](Chain &C, size_t upto){
+                    if (!C.enabled) return;
+                    for (size_t k = 0; k <= upto; ++k) {
+                        ceres::Manifold *manifold = new PoseManifold();
+                        problem.AddParameterBlock(C.statedata[k].pose, Preintegration::numPoseParameter(), manifold);
+                        problem.AddParameterBlock(C.statedata[k].mix,  Preintegration::numMixParameter(preintegration_options));
+                    }
+                };
+                add_chain_params(chain_left,  preintegrationlist.size());
+                add_chain_params(chain_right, preintegrationlist.size());
 
                 // GNSS measurement factors (position with robust loss)
                 // GNSS factors
@@ -744,7 +847,11 @@ int main(int argc, char *argv[]) {
                     auto factor = new GnssFactor(gnss, antlever_anchor);
                     for (size_t i = index; i <= preintegrationlist.size(); ++i) {
                         if (fabs(gnss.time - timelist[i]) < MINIMUM_INTERVAL) {
-                            auto id = problem.AddResidualBlock(factor, loss_function, statedatalist[i].pose);
+                            // Attach GNSS to anchor chain's pose block
+                            double *poseptr = statedatalist[i].pose; // default
+                            if (anchor_chain == &chain_left && chain_left.enabled)   poseptr = chain_left.statedata[i].pose;
+                            if (anchor_chain == &chain_right && chain_right.enabled) poseptr = chain_right.statedata[i].pose;
+                            auto id = problem.AddResidualBlock(factor, loss_function, poseptr);
                             gnss_residualblock_id.push_back(std::make_pair(gnss.time, id));
                             index++;
                             break;
@@ -753,18 +860,38 @@ int main(int argc, char *argv[]) {
                 }
 
                 // IMU preintegration factors between consecutive states
-                // preintegration factors
+                // main chain
                 for (size_t k = 0; k < preintegrationlist.size(); k++) {
                     auto factor = new PreintegrationFactor(preintegrationlist[k]);
                     problem.AddResidualBlock(factor, nullptr, statedatalist[k].pose, statedatalist[k].mix,
                                              statedatalist[k + 1].pose, statedatalist[k + 1].mix);
                 }
+                // bias process prior (main)
                 {
-                    // IMU bias constraint (random-walk process prior)
-                    // add IMU bias-constraint factors
                     auto factor = new ImuErrorFactor(*preintegrationlist.rbegin());
                     problem.AddResidualBlock(factor, nullptr, statedatalist[preintegrationlist.size()].mix);
                 }
+                // Wheel-chain internal IMU preintegration + bias priors (Step 3; left first)
+                auto add_chain_preints = [&](Chain &C, ImuSource &S){
+                    if (!C.enabled) return;
+                    const size_t upto = (S.preint.size());
+                    if (upto == 0) return;
+                    for (size_t k = 0; k < upto; ++k) {
+                        auto &pi = S.preint[k];
+                        if (!pi) continue;
+                        if (!std::isfinite(pi->deltaTime()) || pi->deltaTime() <= 1e-6) continue;
+                        auto factor = new PreintegrationFactor(pi);
+                        problem.AddResidualBlock(factor, nullptr,
+                                                 C.statedata[k].pose, C.statedata[k].mix,
+                                                 C.statedata[k+1].pose, C.statedata[k+1].mix);
+                    }
+                    auto biasf = new ImuErrorFactor(*S.preint.rbegin());
+                    problem.AddResidualBlock(biasf, nullptr, C.statedata[upto].mix);
+                };
+                // 逐步启用：先左后右；右链可稍后再打开
+                add_chain_preints(chain_left,  imu_left);
+                // 启用右轮链链内预积分（已通过左链验证稳定后打开）
+                add_chain_preints(chain_right, imu_right);
 
                 // Add wheel-speed (odometer) factors as separate measurement streams
                 if (has_odo_sources) {
@@ -1222,6 +1349,24 @@ int main(int argc, char *argv[]) {
                     }
                     statelist[windows] = Preintegration::stateFromData(statedatalist[windows], preintegration_options);
                     state_curr         = statelist[windows];
+
+                    //同步滑窗：轮链内 preint 出队 + 状态覆盖（不改变capacity）
+                    if (chain_left.enabled && !imu_left.preint.empty()) {
+                        imu_left.preint.pop_front();
+                        for (int k = 0; k < windows; ++k) {
+                            chain_left.statedata[k] = chain_left.statedata[k+1];
+                            chain_left.states[k]    = Preintegration::stateFromData(chain_left.statedata[k], preintegration_options);
+                        }
+                        chain_left.states[windows] = Preintegration::stateFromData(chain_left.statedata[windows], preintegration_options);
+                    }
+                    if (chain_right.enabled && !imu_right.preint.empty()) {
+                        imu_right.preint.pop_front();
+                        for (int k = 0; k < windows; ++k) {
+                            chain_right.statedata[k] = chain_right.statedata[k+1];
+                            chain_right.states[k]    = Preintegration::stateFromData(chain_right.statedata[k], preintegration_options);
+                        }
+                        chain_right.states[windows] = Preintegration::stateFromData(chain_right.statedata[windows], preintegration_options);
+                    }
                 }
             } else {
                 state_curr =
@@ -1235,12 +1380,14 @@ int main(int argc, char *argv[]) {
             // build a new preintegration object
             preintegrationlist.emplace_back(
                 Preintegration::createPreintegration(parameters, imu_pre, state_curr, preintegration_options));
-            // also start new segments for secondary IMUs
+            // also start new segments for secondary IMUs (use each chain's latest state)
             for (auto *s : active_imus) {
                 if (s==driver) continue;
-                s->state = Preintegration::stateFromData(statedatalist[preintegrationlist.size()-1], preintegration_options);
+                IntegrationState s_last;
+                if (s==&imu_left && chain_left.enabled)   s_last = chain_left.states[preintegrationlist.size()-1];
+                if (s==&imu_right && chain_right.enabled) s_last = chain_right.states[preintegrationlist.size()-1];
                 IMU seed = s->curr;
-                s->preint.emplace_back(std::make_shared<PreintegrationWheel>(parameters, seed, s->state, s->extrinsic_angle, s->lever));
+                s->preint.emplace_back(std::make_shared<PreintegrationWheel>(parameters, seed, s_last, s->extrinsic_angle, s->lever));
             }
         } else {
             auto integration = *preintegrationlist.rbegin();
