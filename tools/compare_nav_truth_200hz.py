@@ -41,7 +41,7 @@ def interp_seq(tn, xn, tq):
         out[i]= x0 + a*(x1-x0)
     return out
 
-def compare(nav_path, truth_path, out_csv=None, series_csv=None, png_path=None, traj_png=None):
+def compare(nav_path, truth_path, out_csv=None, series_csv=None, png_path=None, traj_png=None, err_png=None):
     tn, lan, lon, hn = read_nav(nav_path)
     tt, lat, lot, ht = read_truth(truth_path)
     if not tn or not tt:
@@ -72,6 +72,7 @@ def compare(nav_path, truth_path, out_csv=None, series_csv=None, png_path=None, 
     ts_plot = []
     nav_E = []; nav_N = []; nav_U = []
     tru_E = []; tru_N = []; tru_U = []
+    dxs = []; dys = []; dzs = []; hs = []; e3s = []
     for i, (la_n, lo_n, h_n) in enumerate(zip(lan_i, lon_i, hn_i)):
         if la_n is None:
             continue
@@ -83,6 +84,7 @@ def compare(nav_path, truth_path, out_csv=None, series_csv=None, png_path=None, 
         h  = math.hypot(dx,dy)
         e3 = math.hypot(h, dz)
         rows.append((tt[i], dx, dy, dz, h, e3))
+        dxs.append(dx); dys.append(dy); dzs.append(dz); hs.append(h); e3s.append(e3)
         # ENU series (nav/truth)
         e1, n1, u1 = to_ENU(la_n, lo_n, h_n, lat_ref, lon_ref, h_ref)
         e0, n0, u0 = to_ENU(lat[i], lot[i], ht[i], lat_ref, lon_ref, h_ref)
@@ -94,10 +96,14 @@ def compare(nav_path, truth_path, out_csv=None, series_csv=None, png_path=None, 
     n=len(rows)
     rmse_h = (sum(r[4]*r[4] for r in rows)/n)**0.5
     rmse_3 = (sum(r[5]*r[5] for r in rows)/n)**0.5
+    rmse_dx = (sum(x*x for x in dxs)/n)**0.5
+    rmse_dy = (sum(y*y for y in dys)/n)**0.5
+    rmse_dz = (sum(z*z for z in dzs)/n)**0.5
     mean_h = sum(r[4] for r in rows)/n
     max_h  = max(r[4] for r in rows)
     print(f'Samples: {n}')
     print(f'RMSE_h={rmse_h:.3f} m, RMSE_3D={rmse_3:.3f} m, mean_h={mean_h:.3f}, max_h={max_h:.3f}')
+    print(f'RMSE components: dx={rmse_dx:.3f} m, dy={rmse_dy:.3f} m, dz={rmse_dz:.3f} m')
     if out_csv:
         out = Path(out_csv)
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -147,6 +153,33 @@ def compare(nav_path, truth_path, out_csv=None, series_csv=None, png_path=None, 
             print('Saved plot to:', outp)
         except Exception as e:
             print('plot skipped (matplotlib not available?):', e)
+    if err_png:
+        try:
+            import matplotlib
+            matplotlib.use('Agg')
+            import matplotlib.pyplot as plt
+            fig, axs = plt.subplots(4, 1, figsize=(10, 9), sharex=True)
+            axs[0].plot(ts_plot, dxs, 'r-', lw=1.0)
+            axs[0].set_ylabel('dx [m]')
+            axs[0].grid(True, ls='--', alpha=0.4)
+            axs[0].set_title(f'Errors vs Time (200 Hz)\nRMSE dx={rmse_dx:.3f}, dy={rmse_dy:.3f}, dz={rmse_dz:.3f}, horiz={rmse_h:.3f}, 3D={rmse_3:.3f} [m]')
+            axs[1].plot(ts_plot, dys, 'g-', lw=1.0)
+            axs[1].set_ylabel('dy [m]')
+            axs[1].grid(True, ls='--', alpha=0.4)
+            axs[2].plot(ts_plot, dzs, 'b-', lw=1.0)
+            axs[2].set_ylabel('dz [m]')
+            axs[2].grid(True, ls='--', alpha=0.4)
+            axs[3].plot(ts_plot, hs, 'k-', lw=1.0)
+            axs[3].set_ylabel('|h| [m]')
+            axs[3].set_xlabel('time [s]')
+            axs[3].grid(True, ls='--', alpha=0.4)
+            fig.tight_layout()
+            outp = Path(err_png)
+            outp.parent.mkdir(parents=True, exist_ok=True)
+            fig.savefig(outp, dpi=150)
+            print('Saved error plot to:', outp)
+        except Exception as e:
+            print('error plot skipped (matplotlib not available?):', e)
     if traj_png:
         try:
             import matplotlib
@@ -184,5 +217,7 @@ if __name__=='__main__':
     ap.add_argument('--series', help='Output CSV path for ENU time series (nav & truth)', default=None)
     ap.add_argument('--png', help='Output PNG path for X/Y/Z time series plot', default=None)
     ap.add_argument('--traj', help='Output PNG path for 2D ENU trajectory plot', default=None)
+    ap.add_argument('--errpng', help='Output PNG path for error time series (dx/dy/dz/horiz)', default=None)
     args = ap.parse_args()
-    raise SystemExit(compare(args.nav, args.truth, args.out, args.series, args.png, args.traj))
+    raise SystemExit(compare(args.nav, args.truth, args.out, args.series, args.png, args.traj, args.errpng))
+
