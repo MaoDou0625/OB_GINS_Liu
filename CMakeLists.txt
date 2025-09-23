@@ -28,7 +28,13 @@ file(GLOB_RECURSE SOURCE
         src/preintegration/preintegration_normal.cc
         src/preintegration/preintegration_earth.cc
         src/preintegration/preintegration_odo.cc
-        src/preintegration/preintegration_earth_odo.cc)
+        src/preintegration/preintegration_earth_odo.cc
+        # wheel preintegration (independent classes, currently not wired)
+        src/wheel/preintegration_wheel_base.cc
+        src/wheel/preintegration_wheel_normal.cc
+        src/wheel/preintegration_wheel_odo.cc
+        src/wheel/preintegration_wheel_earth.cc
+        src/wheel/preintegration_wheel_earth_odo.cc)
 
 include_directories(${PROJECT_SOURCE_DIR})
 add_executable(${PROJECT_NAME} ${SOURCE})
