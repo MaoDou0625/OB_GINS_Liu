@@ -37,9 +37,8 @@
 #include "src/factors/nhc_factor.h"
 #include "src/factors/diff_yaw_factor.h"
 #include "src/factors/scalar_prior_factor.h"
-// cross-chain factors (decoupled)
-#include "src/cross/gyro_share_factor.h"
-#include "src/cross/att_share_factor.h"
+#include "src/factors/gyro_share_factor.h"
+#include "src/factors/att_share_factor.h"
 #include "src/preintegration/imu_error_factor.h"
 #include "src/preintegration/preintegration.h"
 #include "src/preintegration/preintegration_factor.h"
@@ -651,13 +650,7 @@ int main(int argc, char *argv[]) {
 
     // Initial preintegration: seed with driver IMU sample and initial state
     IMU drv_seed = driver->buffer.empty()? driver->curr : driver->buffer.back();
-    if (driver->is_wheel) {
-        preintegrationlist.emplace_back(std::make_shared<PreintegrationWheel>(parameters, drv_seed, state_curr,
-                                                                             driver->extrinsic_angle, driver->lever));
-    } else {
-        preintegrationlist.emplace_back(
-            Preintegration::createPreintegration(parameters, drv_seed, state_curr, preintegration_options));
-    }
+    preintegrationlist.emplace_back(Preintegration::createPreintegration(parameters, drv_seed, state_curr, preintegration_options));
     // Initialize each IMU's independent state
     for (auto *s : active_imus) s->state = state_curr;
     // Seed wheel IMU preintegrations for independence
@@ -1299,14 +1292,8 @@ int main(int argc, char *argv[]) {
 
             // Start a new preintegration segment from the latest state
             // build a new preintegration object
-            if (driver->is_wheel) {
-                preintegrationlist.emplace_back(std::make_shared<PreintegrationWheel>(parameters, imu_pre, state_curr,
-                                                                                     driver->extrinsic_angle,
-                                                                                     driver->lever));
-            } else {
-                preintegrationlist.emplace_back(
-                    Preintegration::createPreintegration(parameters, imu_pre, state_curr, preintegration_options));
-            }
+            preintegrationlist.emplace_back(
+                Preintegration::createPreintegration(parameters, imu_pre, state_curr, preintegration_options));
             // also start new segments for secondary IMUs
             for (auto *s : active_imus) {
                 if (s==driver) continue;
