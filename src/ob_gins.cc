@@ -236,9 +236,87 @@ int main(int argc, char *argv[]) {
         imu_left.name = "left"; imu_left.is_wheel = true;
     }
 
+    // Run-mode gating: lock down sensor set and cross-chain factor usage
+    std::string run_mode = "";
+    auto warn_override = [&](const char* who, bool from, bool to){
+        if (from != to) {
+            std::cout << absl::StrFormat("[RunMode] override %s.enable: %d -> %d", who, from?1:0, to?1:0) << std::endl;
+        }
+    };
+    bool allow_share_factors = true; // gyro/att share factors across chains
+    if (config["run_mode"]) {
+        YAML::Node rmnode = config["run_mode"];
+        if (rmnode.IsScalar()) {
+            // Backward compatibility: string presets (deprecated)
+            run_mode = rmnode.as<std::string>();
+            std::string rm = run_mode;
+            for (auto &c: rm) c = (char)tolower(c);
+            if (rm == "single_wheel_gnss") {
+                bool want_left = imu_left.loader != nullptr || config["wheel_imu_left"]; // presence hint
+                bool final_left = want_left;
+                bool final_right = (!final_left) && (imu_right.loader != nullptr || config["wheel_imu_right"]);
+                warn_override("imu_main", imu_main.enabled, false); imu_main.enabled = false;
+                warn_override("wheel_imu_left", imu_left.enabled, final_left); imu_left.enabled = final_left;
+                warn_override("wheel_imu_right", imu_right.enabled, final_right); imu_right.enabled = final_right;
+                allow_share_factors = false;
+            } else if (rm == "body_wheel_gnss") {
+                bool final_left = (imu_left.loader != nullptr || config["wheel_imu_left"]);
+                bool final_right = (!final_left) && (imu_right.loader != nullptr || config["wheel_imu_right"]);
+                warn_override("imu_main", imu_main.enabled, true); imu_main.enabled = true;
+                warn_override("wheel_imu_left", imu_left.enabled, final_left); imu_left.enabled = final_left;
+                warn_override("wheel_imu_right", imu_right.enabled, final_right); imu_right.enabled = final_right;
+                allow_share_factors = false;
+            } else if (rm == "dual_wheel_gnss") {
+                warn_override("imu_main", imu_main.enabled, false); imu_main.enabled = false;
+                warn_override("wheel_imu_left", imu_left.enabled, true); imu_left.enabled = true;
+                warn_override("wheel_imu_right", imu_right.enabled, true); imu_right.enabled = true;
+                allow_share_factors = true;
+            } else if (rm == "triple_imu_gnss") {
+                warn_override("imu_main", imu_main.enabled, true); imu_main.enabled = true;
+                warn_override("wheel_imu_left", imu_left.enabled, true); imu_left.enabled = true;
+                warn_override("wheel_imu_right", imu_right.enabled, true); imu_right.enabled = true;
+                allow_share_factors = true;
+            } else {
+                std::cout << "[RunMode] unknown run_mode='" << run_mode << "', using YAML enables as-is." << std::endl;
+            }
+        } else if (rmnode.IsMap()) {
+            // Structured config: explicit enables and share toggle
+            bool has_any = false;
+            if (rmnode["imu_main_enable"]) {
+                bool v = rmnode["imu_main_enable"].as<bool>(); warn_override("imu_main", imu_main.enabled, v); imu_main.enabled = v; has_any = true;
+            }
+            if (rmnode["wheel_left_enable"]) {
+                bool v = rmnode["wheel_left_enable"].as<bool>(); warn_override("wheel_imu_left", imu_left.enabled, v); imu_left.enabled = v; has_any = true;
+            }
+            if (rmnode["wheel_right_enable"]) {
+                bool v = rmnode["wheel_right_enable"].as<bool>(); warn_override("wheel_imu_right", imu_right.enabled, v); imu_right.enabled = v; has_any = true;
+            }
+            if (rmnode["share_factors"]) {
+                allow_share_factors = rmnode["share_factors"].as<bool>();
+            } else if (rmnode["share"]) {
+                YAML::Node sh = rmnode["share"]; // combined decision: on if either requested
+                bool on = false;
+                if (sh["enable"]) on = sh["enable"].as<bool>();
+                if (sh["gyro"]) on = on || sh["gyro"].as<bool>();
+                if (sh["att"])  on = on || sh["att"].as<bool>();
+                allow_share_factors = on;
+            }
+            run_mode = "<structured>";
+            if (!has_any) {
+                std::cout << "[RunMode] structured run_mode provided but no toggles set; using YAML enables as-is." << std::endl;
+            }
+        }
+    }
+
     std::vector<ImuSource*> active_imus; if (imu_main.enabled) active_imus.push_back(&imu_main); if (imu_left.enabled) active_imus.push_back(&imu_left); if (imu_right.enabled) active_imus.push_back(&imu_right);
     if (active_imus.empty()) { std::cout << "配置文件未启用任何 IMU（imu_main / wheel_imu_left / wheel_imu_right）。" << std::endl; return -1; }
+    // If fewer than 2 IMUs are active, force-disable cross-chain share factors
+    if ((int)active_imus.size() < 2) allow_share_factors = false;
     ImuSource *driver = imu_main.enabled? &imu_main : (imu_left.enabled? &imu_left : &imu_right);
+    std::cout << absl::StrFormat("[RunMode] %s | active: main=%d left=%d right=%d | share_factors=%s",
+                                  run_mode.empty()?"<as-is>":run_mode.c_str(),
+                                  imu_main.enabled?1:0, imu_left.enabled?1:0, imu_right.enabled?1:0,
+                                  allow_share_factors?"on":"off") << std::endl;
 
     // Consider Earth's rotation in mechanization (Coriolis and Earth-rate effects)
     // Affects preintegration dynamics if true
@@ -1170,7 +1248,7 @@ int main(int argc, char *argv[]) {
                 }
 
                 // Wheel-IMU gyro/att share factors via unified IMU sources
-                {
+                if (allow_share_factors) {
                     const int mix_dim = Preintegration::numMixParameter(preintegration_options);
                     for (auto *sp : active_imus) {
                         if (!sp->is_wheel || !sp->loader) continue;
