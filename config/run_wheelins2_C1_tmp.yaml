@@ -1,12 +1,6 @@
-run_mode:
-  imu_main_enable: false
-  wheel_left_enable: true
-  wheel_right_enable: false
-  share_factors: false
 imu_main:
   enable: true
-  #file: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Body-IMU/C1_imu_increments.txt"
-  file: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Wheel-IMU-Left/C1_imu_increments.txt"
+  file: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Body-IMU/C1_imu_increments.txt"
   columns: 7
   rate_hz: 200
   imumodel:
@@ -17,9 +11,8 @@ imu_main:
     corrtime: 1.0
 
 wheel_imu_left:
-  enable: true
+  enable: false
   file: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Wheel-IMU-Left/C1_imu_increments.txt"
-  #file: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Body-IMU/C1_imu_increments.txt"
   columns: 7
   rate_hz: 200
   extrinsic_deg: [0, 0, -3.43]
@@ -34,7 +27,7 @@ wheel_imu_left:
     huber_delta: 1.0
 
 wheel_imu_right:
-  enable: true
+  enable: false
   file: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Wheel-IMU-Right/C1_imu_increments.txt"
   columns: 7
   rate_hz: 200
@@ -50,11 +43,11 @@ wheel_imu_right:
     huber_delta: 1.0
 
 gnssfile: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Ground Truth/GINS_all.pos"
-outputpath: "D:/Code/dataset/wheel-ins2_dataset/converted/out/C1"
+outputpath: "D:/Code/dataset/wheel-ins2_dataset/converted/out/C1_tmp_auto"
 
 windows: 30
-starttime: 131898
-endtime: 132098
+starttime: 132025
+endtime: 132225
 
 num_iterations: 10
 is_outlier_culling: false

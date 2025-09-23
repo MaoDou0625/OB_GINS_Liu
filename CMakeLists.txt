@@ -24,7 +24,6 @@ file(GLOB_RECURSE SOURCE
         src/factors/pose_manifold.cc
         src/preintegration/preintegration_base.cc
         src/preintegration/preintegration_normal.cc
-        src/preintegration/preintegration_wheel.cc
         src/preintegration/preintegration_earth.cc
         src/preintegration/preintegration_odo.cc
         src/preintegration/preintegration_earth_odo.cc)

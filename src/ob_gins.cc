@@ -1,4 +1,5 @@
 ﻿/*
+
  * OB_GINS: An Optimization-Based GNSS/INS Integrated Navigation System
  *
  * Copyright (C) 2022 i2Nav Group, Wuhan University
@@ -42,7 +43,9 @@
 #include "src/preintegration/imu_error_factor.h"
 #include "src/preintegration/preintegration.h"
 #include "src/preintegration/preintegration_factor.h"
-#include "src/preintegration/preintegration_wheel.h"
+#include "src/wheel/wheel_preintegration.h"
+#include "src/wheel/wheel_speed_factor.h"
+#include "src/wheel/nhc_factor.h"
 
 #include <absl/strings/str_format.h>
 #include <absl/time/clock.h>
@@ -276,7 +279,7 @@ int main(int argc, char *argv[]) {
     }
 
     std::vector<ImuSource*> active_imus; if (imu_main.enabled) active_imus.push_back(&imu_main); if (imu_left.enabled) active_imus.push_back(&imu_left); if (imu_right.enabled) active_imus.push_back(&imu_right);
-    if (active_imus.empty()) { std::cout << "配置文件未启用任何 IMU（imu_main / wheel_imu_left / wheel_imu_right）。" << std::endl; return -1; }
+    if (active_imus.empty()) { std::cout << "�����ļ�δ�����κ� IMU��imu_main / wheel_imu_left / wheel_imu_right����" << std::endl; return -1; }
     // If fewer than 2 IMUs are active, force-disable cross-chain share factors
     if ((int)active_imus.size() < 2) allow_share_factors = false;
     ImuSource *driver = imu_main.enabled? &imu_main : (imu_left.enabled? &imu_left : &imu_right);
@@ -321,17 +324,17 @@ int main(int argc, char *argv[]) {
     Vector3d bodyangle(vec.data());
     bodyangle *= D2R;
 
-    // IMU鍣０鍙傛暟
+    // IMU噪声参数
     // IMU noise parameters
     auto parameters          = std::make_shared<IntegrationParameters>();
 
-        // 优先从启用的 IMU 区块(imu_main / wheel_imu)下的 imumodel 读取；没有则回退到全局 imumodel；再没有则用默认值。
+        // ���ȴ����õ� IMU ����(imu_main / wheel_imu)�µ� imumodel ��ȡ��û�������˵�ȫ�� imumodel����û������Ĭ��ֵ��
     YAML::Node imu_model;
     if (config["imumodel"]) {
         imu_model = config["imumodel"];
     }
 
-    double arw_deg_per_hr      = 0.24;  // 默认与历史配置一致
+    double arw_deg_per_hr      = 0.24;  // Ĭ������ʷ����һ��
     double gbstd_deg_per_hr    = 50.0;
     double vrw_mps_sqrt_hour   = 0.24;
     double abstd_mg            = 250.0;
@@ -519,7 +522,7 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    // Differential yaw-rate (Δω) factor configuration
+    // Differential yaw-rate (����) factor configuration
     YAML::Node diffyaw_cfg          = config["diff_yaw"];
     bool use_diffyaw                = false;
     double diffyaw_baseline         = 1.5;   // axle baseline [m]
@@ -566,7 +569,7 @@ int main(int argc, char *argv[]) {
     // Baseline optimization parameter (shared across windows)
     double dyaw_baseline_param = diffyaw_baseline;
 
-    // GNSS浠跨湡涓柇閰嶇疆
+    // GNSS仿真中断配置
     // GNSS outage parameters
     bool isuseoutage = config["isuseoutage"].as<bool>();
     int outagetime   = config["outagetime"].as<int>();
@@ -658,7 +661,7 @@ int main(int argc, char *argv[]) {
         if (s==driver) continue;
         IMU seed = s->buffer.empty()? s->curr : s->buffer.back();
         s->preint.clear();
-        s->preint.emplace_back(std::make_shared<PreintegrationWheel>(parameters, seed, s->state, s->extrinsic_angle, s->lever));
+        s->preint.emplace_back(wheel::WheelPreintegration::Create(parameters, seed, s->state, preintegration_options));
     }
 
     // Read next GNSS epoch for subsequent steps
@@ -884,7 +887,7 @@ int main(int argc, char *argv[]) {
                                 if (acc_b.norm() > odo_accel_thresh) sigma *= odo_accel_scale;
 
                                 Vector3d omega_x_l = omega_b.cross(src.lever);
-                                auto factor        = new OdoFactor(m.vel, sigma, omega_x_l, mix_dim, src.base_angle);
+                                auto factor        = new WheelSpeedFactor(m.vel, sigma, omega_x_l, mix_dim, src.base_angle);
                                 problem.AddResidualBlock(factor, odo_loss,
                                                          statedatalist[nearest].pose,
                                                          statedatalist[nearest].mix,
@@ -1054,7 +1057,7 @@ int main(int argc, char *argv[]) {
                         if (fabs(omega_b.z()) > odo_yaw_rate_thresh) sigma *= odo_yaw_rate_scale;
                         if (acc_b.norm() > odo_accel_thresh) sigma *= odo_accel_scale;
 
-                        auto nhc = new NhcFactor(sigma, mix_dim);
+                        auto nhc = new WheelNhcFactor(sigma, mix_dim);
                         problem.AddResidualBlock(nhc, nhc_loss, statedatalist[i].pose, statedatalist[i].mix);
                     }
                 }
@@ -1299,7 +1302,7 @@ int main(int argc, char *argv[]) {
                 if (s==driver) continue;
                 s->state = Preintegration::stateFromData(statedatalist[preintegrationlist.size()-1], preintegration_options);
                 IMU seed = s->curr;
-                s->preint.emplace_back(std::make_shared<PreintegrationWheel>(parameters, seed, s->state, s->extrinsic_angle, s->lever));
+                s->preint.emplace_back(wheel::WheelPreintegration::Create(parameters, seed, s->state, preintegration_options));
             }
         } else {
             auto integration = *preintegrationlist.rbegin();
