@@ -2,8 +2,8 @@
 
 # 数据文件
 # Data files
-imufile: ""
-gnssfile: ""
+imufile: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Wheel-IMU-Left/C1_imu_increments.txt"
+gnssfile: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Ground Truth/GINS_all.pos"
 outputpath: ""
 
 # 时间信息, s
