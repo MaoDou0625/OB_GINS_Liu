@@ -39,6 +39,7 @@
 #include <deque>
 #include <iomanip>
 #include <yaml-cpp/yaml.h>
+#include <filesystem>
 
 #define INTEGRATION_LENGTH 1.0
 #define MINIMUM_INTERVAL 0.001
@@ -105,6 +106,19 @@ int main(int argc, char *argv[]) {
     std::string gnsspath   = config["gnssfile"].as<std::string>();
     std::string imupath    = config["imufile"].as<std::string>();
     std::string outputpath = config["outputpath"].as<std::string>();
+    // Ensure output directory exists
+    try {
+        if (!outputpath.empty()) {
+            std::filesystem::path outdir(outputpath);
+            if (!std::filesystem::exists(outdir)) {
+                std::filesystem::create_directories(outdir);
+                std::cout << "[info] output path not found. Created: " << outdir.string() << std::endl;
+            }
+        }
+    } catch (const std::exception &e) {
+        std::cout << "[error] failed to create output path: " << outputpath << ", reason: " << e.what() << std::endl;
+        // Continue; subsequent file open checks will handle failure
+    }
     int imudatalen         = config["imudatalen"].as<int>();
     int imudatarate        = config["imudatarate"].as<int>();
 
