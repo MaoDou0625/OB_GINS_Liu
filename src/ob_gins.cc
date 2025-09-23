@@ -54,6 +54,7 @@
 #include <fstream>
 #include <array>
 #include <unordered_map>
+#include <filesystem>
 
 #define INTEGRATION_LENGTH 1.0
 #define MINIMUM_INTERVAL 0.001
@@ -244,6 +245,20 @@ int main(int argc, char *argv[]) {
     bool isearth = config["isearth"].as<bool>();
 
     GnssFileLoader gnssfile(gnsspath);
+
+    // Ensure output directory exists; create if missing and notify
+    try {
+        namespace fs = std::filesystem;
+        fs::path out_dir(outputpath);
+        if (!out_dir.empty() && !fs::exists(out_dir)) {
+            if (fs::create_directories(out_dir)) {
+                std::cout << "[Info] Created output directory: " << outputpath << std::endl;
+            }
+        }
+    } catch (const std::exception &e) {
+        std::cout << "[Error] Failed to ensure output directory (" << outputpath << ") : " << e.what()
+                  << std::endl;
+    }
     FileSaver navfile(outputpath + "/OB_GINS_TXT.nav", 11, FileSaver::TEXT);
     FileSaver errfile(outputpath + "/OB_GINS_IMU_ERR.bin", 7, FileSaver::BINARY);
     if (!navfile.isOpen() || !navfile.isOpen() || !errfile.isOpen()) {
