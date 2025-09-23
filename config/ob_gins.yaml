@@ -49,7 +49,6 @@ bodyangle: [ 0, 0, 0 ] # IMU到载体的旋转角 (mouting angles to construct C
 
 odometer:
     isuseodo: false             # use odometer
-
     std: [ 0.05, 0.05, 0.05 ]   # 里程标准差 (vehicle velocity standard deviation), m/s
     srw: 100                    # 比例因子误差 (odometer scale-factor standard deviation), PPM
 
