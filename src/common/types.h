@@ -44,6 +44,8 @@ typedef struct IMU {
     Vector3d dvel;
 
     double odovel;
+    // 标注该IMU是否为轮式IMU（Wheel-IMU），默认 false
+    bool is_wheel = false;
 } IMU;
 
 typedef struct Pose {
