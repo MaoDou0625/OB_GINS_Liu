@@ -164,7 +164,9 @@ int main(int argc, char *argv[]) {
     bool isearth = config["isearth"].as<bool>();
 
     GnssFileLoader gnssfile(gnsspath);
-    ImuFileLoader imufile(imupath, imudatalen, imudatarate);
+    // 根据 run_mode 标记 IMU 数据来源（主IMU/轮式IMU），在读取时写入 IMU::is_wheel
+    bool imu_is_wheel = (use_wheel_left || use_wheel_right);
+    ImuFileLoader imufile(imupath, imudatalen, imudatarate, imu_is_wheel);
     FileSaver navfile(outputpath + "/OB_GINS_TXT.nav", 11, FileSaver::TEXT);
     FileSaver errfile(outputpath + "/OB_GINS_IMU_ERR.bin", 7, FileSaver::BINARY);
     if (!imufile.isOpen() || !navfile.isOpen() || !navfile.isOpen() || !errfile.isOpen()) {
@@ -680,12 +682,14 @@ void imuInterpolation(const IMU &imu01, IMU &imu00, IMU &imu11, double mid) {
     imu00.dtheta = buff.dtheta * (1 - scale);
     imu00.dvel   = buff.dvel * (1 - scale);
     imu00.odovel = buff.odovel * (1 - scale);
+    imu00.is_wheel = buff.is_wheel;
 
     imu11.time   = buff.time;
     imu11.dt     = buff.time - time;
     imu11.dtheta = buff.dtheta * scale;
     imu11.dvel   = buff.dvel * scale;
     imu11.odovel = buff.odovel * scale;
+    imu11.is_wheel = buff.is_wheel;
 }
 
 int isNeedInterpolation(const IMU &imu0, const IMU &imu1, double mid) {
