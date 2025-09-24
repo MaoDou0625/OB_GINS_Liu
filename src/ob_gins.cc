@@ -33,6 +33,9 @@
 #include "src/preintegration/imu_error_factor.h"
 #include "src/preintegration/preintegration.h"
 #include "src/preintegration/preintegration_factor.h"
+// Wheel-IMU state for wheel-specific output
+#include "src/wheel/integration_state_wheel.h"
+// (Wheel preintegration headers were included temporarily for wiring; removed per request.)
 
 #include <absl/strings/str_format.h>
 #include <absl/time/clock.h>
@@ -49,6 +52,9 @@ void imuInterpolation(const IMU &imu01, IMU &imu00, IMU &imu11, double mid);
 
 void writeNavResult(double time, const Vector3d &origin, const IntegrationState &state, FileSaver &navfile,
                     FileSaver &errfile);
+// Wheel-only writer to allow saving dual navigation results later
+void writeNavResultWheel(double time, const Vector3d &origin, const WheelIntegrationState &state, FileSaver &navfile,
+                         FileSaver &errfile);
 
 int main(int argc, char *argv[]) {
 
@@ -61,7 +67,7 @@ int main(int argc, char *argv[]) {
 
     auto ts = absl::Now();
 
-    // 读取配置
+    // 璇诲彇閰嶇疆
     // load configuration
     YAML::Node config;
     std::vector<double> vec;
@@ -72,21 +78,21 @@ int main(int argc, char *argv[]) {
         return -1;
     }
 
-    // 时间信息
+    // 鏃堕棿淇℃伅
     // processing time
     int windows   = config["windows"].as<int>();
     int starttime = config["starttime"].as<int>();
     int endtime   = config["endtime"].as<int>();
 
-    // 迭代次数
+    // 杩唬娆℃暟
     // number of iterations
     int num_iterations = config["num_iterations"].as<int>();
 
-    // 进行GNSS粗差检测
+    // 杩涜GNSS绮楀樊妫€娴?
     // Do GNSS outlier culling
     bool is_outlier_culling = config["is_outlier_culling"].as<bool>();
 
-    // 初始化信息
+    // 鍒濆鍖栦俊鎭?
     // initialization
     vec = config["initvel"].as<std::vector<double>>();
     Vector3d initvel(vec.data());
@@ -101,11 +107,43 @@ int main(int argc, char *argv[]) {
     Vector3d initba(vec.data());
     initba *= 1.0e-5;
 
-    // 数据文件
+    // 鏁版嵁鏂囦欢
     // data file
     std::string gnsspath   = config["gnssfile"].as<std::string>();
-    std::string imupath    = config["imufile"].as<std::string>();
+    std::string imupath;
+    int imudatalen  = 0;
+    int imudatarate = 0;
     std::string outputpath = config["outputpath"].as<std::string>();
+
+    // 鏂扮増澶欼MU閰嶇疆锛堜紭鍏堜簬鏃у瓧娈碉級
+    bool use_main = false, use_wheel_left = false, use_wheel_right = false;
+    if (config["run_mode"]) {
+        auto rm = config["run_mode"];
+        if (rm["imu_main_enable"])    use_main       = rm["imu_main_enable"].as<bool>();
+        if (rm["wheel_left_enable"])  use_wheel_left = rm["wheel_left_enable"].as<bool>();
+        if (rm["wheel_right_enable"]) use_wheel_right= rm["wheel_right_enable"].as<bool>();
+    }
+
+    // 读取新段 IMU 基本配置（若不存在则回退到旧字段）
+    YAML::Node imu_node;
+    if (use_main && config["imu_main"]) {
+        imu_node = config["imu_main"];
+    } else if (use_wheel_left && config["imu_wheel_left"]) {
+        imu_node = config["imu_wheel_left"];
+    } else if (use_wheel_right && config["imu_wheel_right"]) {
+        imu_node = config["imu_wheel_right"];
+    }
+
+    if (imu_node) {
+        if (imu_node["file"])      imupath     = imu_node["file"].as<std::string>();
+        if (imu_node["columns"])   imudatalen  = imu_node["columns"].as<int>();
+        if (imu_node["rate_hz"])   imudatarate = imu_node["rate_hz"].as<int>();
+        // 兼容旧版字段
+        // 鍏煎鏃х増瀛楁
+        if (config["imufile"])     imupath     = config["imufile"].as<std::string>();
+        if (config["imudatalen"])  imudatalen  = config["imudatalen"].as<int>();
+        if (config["imudatarate"]) imudatarate = config["imudatarate"].as<int>();
+    }
     // Ensure output directory exists
     try {
         if (!outputpath.empty()) {
@@ -119,10 +157,10 @@ int main(int argc, char *argv[]) {
         std::cout << "[error] failed to create output path: " << outputpath << ", reason: " << e.what() << std::endl;
         // Continue; subsequent file open checks will handle failure
     }
-    int imudatalen         = config["imudatalen"].as<int>();
-    int imudatarate        = config["imudatarate"].as<int>();
+    // 鑻ユ湭鍦ㄦ柊閰嶇疆涓祴鍊硷紝纭繚浠嶆湁鏈夋晥榛樿鍊?    if (imudatalen == 0 && config["imudatalen"])  imudatalen  = config["imudatalen"].as<int>();
+    if (imudatarate == 0 && config["imudatarate"]) imudatarate = config["imudatarate"].as<int>();
 
-    // 是否考虑地球自转
+    // 鏄惁鑰冭檻鍦扮悆鑷浆
     // consider the Earth's rotation
     bool isearth = config["isearth"].as<bool>();
 
@@ -135,7 +173,7 @@ int main(int argc, char *argv[]) {
         return -1;
     }
 
-    // 安装参数
+    // 瀹夎鍙傛暟
     // installation parameters
     vec = config["antlever"].as<std::vector<double>>();
     Vector3d antlever(vec.data());
@@ -145,14 +183,26 @@ int main(int argc, char *argv[]) {
     Vector3d bodyangle(vec.data());
     bodyangle *= D2R;
 
-    // IMU噪声参数
     // IMU noise parameters
     auto parameters          = std::make_shared<IntegrationParameters>();
-    parameters->gyr_arw      = config["imumodel"]["arw"].as<double>() * D2R / 60.0;
-    parameters->gyr_bias_std = config["imumodel"]["gbstd"].as<double>() * D2R / 3600.0;
-    parameters->acc_vrw      = config["imumodel"]["vrw"].as<double>() / 60.0;
-    parameters->acc_bias_std = config["imumodel"]["abstd"].as<double>() * 1.0e-5;
-    parameters->corr_time    = config["imumodel"]["corrtime"].as<double>() * 3600;
+    //从新imunoise 读取（存在则覆盖），否则使用旧字imumodel
+    if (imu_node && imu_node["imunoise"]) {
+        auto ino = imu_node["imunoise"];
+        parameters->gyr_arw      = (ino["arw"].as<double>()) * D2R / 60.0;     // deg/sqrt(hr) -> rad/s^0.5
+        parameters->acc_vrw      = (ino["vrw"].as<double>()) / 60.0;           // m/s/sqrt(hr) -> m/s^1.5
+        parameters->gyr_bias_std = (ino["gbstd"].as<double>()) * D2R / 3600.0; // deg/hr -> rad/s
+        parameters->acc_bias_std = (ino["abstd"].as<double>()) * 1.0e-5;       // mGal -> m/s^2
+        parameters->corr_time    = (ino["corrtime"].as<double>()) * 3600.0;    // hr -> s
+        // 比例因子
+        if (ino["gsstd"]) parameters->gyr_scale_std = ino["gsstd"].as<double>() * 1e-6; // ppm -> ratio
+        if (ino["asstd"]) parameters->acc_scale_std = ino["asstd"].as<double>() * 1e-6; // ppm -> ratio
+    } else {
+        parameters->gyr_arw      = config["imumodel"]["arw"].as<double>() * D2R / 60.0;
+        parameters->gyr_bias_std = config["imumodel"]["gbstd"].as<double>() * D2R / 3600.0;
+        parameters->acc_vrw      = config["imumodel"]["vrw"].as<double>() / 60.0;
+        parameters->acc_bias_std = config["imumodel"]["abstd"].as<double>() * 1.0e-5;
+        parameters->corr_time    = config["imumodel"]["corrtime"].as<double>() * 3600;
+    }
 
     bool isuseodo       = config["odometer"]["isuseodo"].as<bool>();
     vec                 = config["odometer"]["std"].as<std::vector<double>>();
@@ -161,7 +211,6 @@ int main(int argc, char *argv[]) {
     parameters->lodo    = odolever;
     parameters->abv     = bodyangle;
 
-    // GNSS仿真中断配置
     // GNSS outage parameters
     bool isuseoutage = config["isuseoutage"].as<bool>();
     int outagetime   = config["outagetime"].as<int>();
@@ -170,7 +219,7 @@ int main(int argc, char *argv[]) {
 
     auto gnssthreshold = config["gnssthreshold"].as<double>();
 
-    // 数据文件调整
+    // 鏁版嵁鏂囦欢璋冩暣
     // data alignment
     IMU imu_cur, imu_pre;
     do {
@@ -183,13 +232,15 @@ int main(int argc, char *argv[]) {
         gnss = gnssfile.next();
     } while (gnss.time < starttime);
 
-    // 初始位置, 求相对
+    // 鍒濆浣嶇疆, 姹傜浉瀵?
     Vector3d station_origin = gnss.blh;
     parameters->gravity     = Earth::gravity(gnss.blh);
     gnss.blh                = Earth::global2local(station_origin, gnss.blh);
 
-    // 站心坐标系原点
+    // 绔欏績鍧愭爣绯诲師鐐?
     parameters->station = station_origin;
+
+    // Wheel preintegration wiring was removed per request; proceed with main IMU chain.
 
     std::vector<IntegrationState> statelist(windows + 1);
     std::vector<IntegrationStateData> statedatalist(windows + 1);
@@ -199,7 +250,7 @@ int main(int argc, char *argv[]) {
 
     Preintegration::PreintegrationOptions preintegration_options = Preintegration::getOptions(isuseodo, isearth);
 
-    // 初始状态
+    // 鍒濆鐘舵€?
     // initialization
     IntegrationState state_curr = {
         .time = round(gnss.time),
@@ -220,21 +271,21 @@ int main(int argc, char *argv[]) {
     double sow = round(gnss.time);
     timelist.push_back(sow);
 
-    // 初始预积分
+    // 鍒濆棰勭Н鍒?
     // Initial preintegration
     preintegrationlist.emplace_back(
         Preintegration::createPreintegration(parameters, imu_pre, state_curr, preintegration_options));
 
-    // 读取下一个整秒GNSS
+    // 璇诲彇涓嬩竴涓暣绉扜NSS
     gnss                = gnssfile.next();
     parameters->gravity = Earth::gravity(gnss.blh);
     gnss.blh            = Earth::global2local(station_origin, gnss.blh);
 
-    // 边缘化信息
+    // 杈圭紭鍖栦俊鎭?
     std::shared_ptr<MarginalizationInfo> last_marginalization_info;
     std::vector<double *> last_marginalization_parameter_blocks;
 
-    // 下一个积分节点
+    // 涓嬩竴涓Н鍒嗚妭鐐?
     sow += INTEGRATION_LENGTH;
 
     while (true) {
@@ -242,7 +293,7 @@ int main(int argc, char *argv[]) {
             break;
         }
 
-        // 加入IMU数据
+        // 鍔犲叆IMU鏁版嵁
         // Add new imu data to preintegration
         preintegrationlist.back()->addNewImu(imu_cur);
 
@@ -250,7 +301,7 @@ int main(int argc, char *argv[]) {
         imu_cur = imufile.next();
 
         if (imu_cur.time > sow) {
-            // 当前IMU数据时间等于GNSS数据时间, 读取新的GNSS
+            // 褰撳墠IMU鏁版嵁鏃堕棿绛変簬GNSS鏁版嵁鏃堕棿, 璇诲彇鏂扮殑GNSS
             // add GNSS and read new GNSS
             if (fabs(gnss.time - sow) < MINIMUM_INTERVAL) {
                 gnsslist.push_back(gnss);
@@ -261,7 +312,7 @@ int main(int argc, char *argv[]) {
                     gnss = gnssfile.next();
                 }
 
-                // 中断配置
+                // 涓柇閰嶇疆
                 // do GNSS outage
                 if (isuseoutage) {
                     if (lround(gnss.time) == outagetime) {
@@ -280,7 +331,7 @@ int main(int argc, char *argv[]) {
                 }
             }
 
-            // IMU内插处理
+            // IMU鍐呮彃澶勭悊
             // IMU interpolation
             int isneed = isNeedInterpolation(imu_pre, imu_cur, sow);
             if (isneed == -1) {
@@ -294,17 +345,17 @@ int main(int argc, char *argv[]) {
                 preintegrationlist.back()->addNewImu(imu_pre);
             }
 
-            // 下一个积分节点
+            // 涓嬩竴涓Н鍒嗚妭鐐?
             // next time node
             timelist.push_back(sow);
             sow += INTEGRATION_LENGTH;
 
-            // 当前整秒状态加入到滑窗中
+            // 褰撳墠鏁寸鐘舵€佸姞鍏ュ埌婊戠獥涓?
             state_curr                               = preintegrationlist.back()->currentState();
             statelist[preintegrationlist.size()]     = state_curr;
             statedatalist[preintegrationlist.size()] = Preintegration::stateToData(state_curr, preintegration_options);
 
-            // 构建优化问题
+            // 鏋勫缓浼樺寲闂
             // construct optimization problem
             {
                 ceres::Problem::Options problem_options;
@@ -318,10 +369,10 @@ int main(int argc, char *argv[]) {
                 options.linear_solver_type         = ceres::SPARSE_NORMAL_CHOLESKY;
                 options.num_threads                = 4;
 
-                // 参数块
+                // 鍙傛暟鍧?
                 // add parameter blocks
                 for (size_t k = 0; k <= preintegrationlist.size(); k++) {
-                    // 位姿
+                    // 浣嶅Э
                     ceres::Manifold *manifold = new PoseManifold();
                     problem.AddParameterBlock(statedatalist[k].pose, Preintegration::numPoseParameter(), manifold);
 
@@ -329,7 +380,7 @@ int main(int argc, char *argv[]) {
                                               Preintegration::numMixParameter(preintegration_options));
                 }
 
-                // GNSS残差
+                // GNSS娈嬪樊
                 // GNSS factors
                 int index = 0;
 
@@ -347,7 +398,7 @@ int main(int argc, char *argv[]) {
                     }
                 }
 
-                // 预积分残差
+                // 棰勭Н鍒嗘畫宸?
                 // preintegration factors
                 for (size_t k = 0; k < preintegrationlist.size(); k++) {
                     auto factor = new PreintegrationFactor(preintegrationlist[k]);
@@ -355,20 +406,20 @@ int main(int argc, char *argv[]) {
                                              statedatalist[k + 1].pose, statedatalist[k + 1].mix);
                 }
                 {
-                    // IMU误差控制
+                    // IMU璇樊鎺у埗
                     // add IMU bias-constraint factors
                     auto factor = new ImuErrorFactor(*preintegrationlist.rbegin());
                     problem.AddResidualBlock(factor, nullptr, statedatalist[preintegrationlist.size()].mix);
                 }
 
-                // 边缘化残差
+                // 杈圭紭鍖栨畫宸?
                 // prior factor
                 if (last_marginalization_info && last_marginalization_info->isValid()) {
                     auto factor = new MarginalizationFactor(last_marginalization_info);
                     problem.AddResidualBlock(factor, nullptr, last_marginalization_parameter_blocks);
                 }
 
-                // 求解最小二乘
+                // 姹傝В鏈€灏忎簩涔?
                 // solve the Least-Squares problem
                 options.max_num_iterations = num_iterations / 4;
                 solver.Solve(options, &problem, &summary);
@@ -430,7 +481,7 @@ int main(int argc, char *argv[]) {
                 options.max_num_iterations = num_iterations * 3 / 4;
                 solver.Solve(options, &problem, &summary);
 
-                // 输出进度
+                // 杈撳嚭杩涘害
                 // output the percentage
                 int percent            = ((int) sow - starttime) * 100 / (endtime - starttime);
                 static int lastpercent = 0;
@@ -443,7 +494,7 @@ int main(int argc, char *argv[]) {
 
             if (preintegrationlist.size() == static_cast<size_t>(windows)) {
                 {
-                    // 边缘化
+                    // 杈圭紭鍖?
                     // marginalization
                     std::shared_ptr<MarginalizationInfo> marginalization_info = std::make_shared<MarginalizationInfo>();
                     if (last_marginalization_info && last_marginalization_info->isValid()) {
@@ -462,7 +513,7 @@ int main(int argc, char *argv[]) {
                         marginalization_info->addResidualBlockInfo(residual);
                     }
 
-                    // IMU残差
+                    // IMU娈嬪樊
                     // preintegration factors
                     {
                         auto factor   = std::make_shared<PreintegrationFactor>(preintegrationlist[0]);
@@ -474,7 +525,7 @@ int main(int argc, char *argv[]) {
                         marginalization_info->addResidualBlockInfo(residual);
                     }
 
-                    // GNSS残差
+                    // GNSS娈嬪樊
                     // GNSS factors
                     {
                         if (fabs(timelist[0] - gnsslist[0].time) < MINIMUM_INTERVAL) {
@@ -485,11 +536,11 @@ int main(int argc, char *argv[]) {
                         }
                     }
 
-                    // 边缘化处理
+                    // 杈圭紭鍖栧鐞?
                     // do marginalization
                     marginalization_info->marginalization();
 
-                    // 数据指针调整
+                    // 鏁版嵁鎸囬拡璋冩暣
                     // get new pointers
                     std::unordered_map<long, double *> address;
                     for (size_t k = 1; k <= preintegrationlist.size(); k++) {
@@ -500,7 +551,7 @@ int main(int argc, char *argv[]) {
                     last_marginalization_info             = std::move(marginalization_info);
                 }
 
-                // 滑窗处理
+                // 婊戠獥澶勭悊
                 // sliding window
                 {
                     if (lround(timelist[0]) == lround(gnsslist[0].time)) {
@@ -524,7 +575,7 @@ int main(int argc, char *argv[]) {
             // write result
             writeNavResult(*timelist.rbegin(), station_origin, state_curr, navfile, errfile);
 
-            // 新建立新的预积分
+            // 鏂板缓绔嬫柊鐨勯绉垎
             // build a new preintegration object
             preintegrationlist.emplace_back(
                 Preintegration::createPreintegration(parameters, imu_pre, state_curr, preintegration_options));
@@ -547,6 +598,49 @@ int main(int argc, char *argv[]) {
 
 void writeNavResult(double time, const Vector3d &origin, const IntegrationState &state, FileSaver &navfile,
                     FileSaver &errfile) {
+    vector<double> result;
+
+    Vector3d pos = Earth::local2global(origin, state.p);
+    pos.segment(0, 2) *= R2D;
+    Vector3d att = Rotation::quaternion2euler(state.q) * R2D;
+    Vector3d vel = state.v;
+    Vector3d bg  = state.bg * R2D * 3600;
+    Vector3d ba  = state.ba * 1e5;
+
+    {
+        result.clear();
+
+        result.push_back(0);
+        result.push_back(time);
+        result.push_back(pos[0]);
+        result.push_back(pos[1]);
+        result.push_back(pos[2]);
+        result.push_back(vel[0]);
+        result.push_back(vel[1]);
+        result.push_back(vel[2]);
+        result.push_back(att[0]);
+        result.push_back(att[1]);
+        result.push_back(att[2]);
+        navfile.dump(result);
+    }
+
+    {
+        result.clear();
+
+        result.push_back(time);
+        result.push_back(bg[0]);
+        result.push_back(bg[1]);
+        result.push_back(bg[2]);
+        result.push_back(ba[0]);
+        result.push_back(ba[1]);
+        result.push_back(ba[2]);
+        result.push_back(state.sodo);
+        errfile.dump(result);
+    }
+}
+
+void writeNavResultWheel(double time, const Vector3d &origin, const WheelIntegrationState &state, FileSaver &navfile,
+                         FileSaver &errfile) {
     vector<double> result;
 
     Vector3d pos = Earth::local2global(origin, state.p);
@@ -613,23 +707,25 @@ int isNeedInterpolation(const IMU &imu0, const IMU &imu1, double mid) {
     if (imu0.time < time && imu1.time > time) {
         double dt = time - imu0.time;
 
-        // 前一个历元接近
+        // 鍓嶄竴涓巻鍏冩帴杩?
         // close to the first epoch
         if (dt < 0.0001) {
             return -1;
         }
 
-        // 后一个历元接近
+        // 鍚庝竴涓巻鍏冩帴杩?
         // close to the second epoch
         dt = imu1.time - time;
         if (dt < 0.0001) {
             return 1;
         }
 
-        // 需内插
+        // 闇€鍐呮彃
         // need interpolation
         return 2;
     }
 
     return 0;
 }
+
+

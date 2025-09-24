@@ -1,16 +1,63 @@
 # OB_GINS: Optimization-Based GNSS/INS Integrated Navigation System
-
+run_mode:
+  imu_main_enable: false
+  wheel_left_enable: true
+  wheel_right_enable: false
+  share_factors: false
 # 数据文件
 # Data files
-imufile: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Wheel-IMU-Left/C1_imu_increments.txt"
 gnssfile: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Ground Truth/GINS_all.pos"
-outputpath: ""
+outputpath: "D:/Code/dataset/wheel-ins2_dataset/converted/out/C1-Test"
+
+
+# multi-IMU independent configs (main/left/right)
+imu_main:
+  file: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Body-IMU/C1_imu_increments.txt"
+  columns: 7
+  rate_hz: 200
+  imunoise:
+    arw: 1.2
+    vrw: 6
+    gbstd: 50
+    abstd: 2000
+    gsstd: 50
+    asstd: 500
+    corrtime: 1.0
+
+imu_wheel_left:
+  file: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Wheel-IMU-Left/C1_imu_increments.txt"
+  columns: 9
+  rate_hz: 200
+  imunoise:
+    arw: 1.2
+    vrw: 6
+    gbstd: 50
+    abstd: 2000
+    gsstd: 50
+    asstd: 500
+    corrtime: 1.0
+
+imu_wheel_right:
+  file: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Wheel-IMU-Right/C1_imu_increments.txt"
+  columns: 9
+  rate_hz: 200
+  imunoise:
+    arw: 1.2
+    vrw: 6
+    gbstd: 50
+    abstd: 2000
+    gsstd: 50
+    asstd: 500
+    corrtime: 1.0
+
+
+
 
 # 时间信息, s
 # Processing time parameters
 windows: 30
-starttime: 0
-endtime: 0
+starttime: 132025
+endtime: 132225
 
 # 迭代次数
 # number of iterations
@@ -52,15 +99,6 @@ odometer:
     std: [ 0.05, 0.05, 0.05 ]   # 里程标准差 (vehicle velocity standard deviation), m/s
     srw: 100                    # 比例因子误差 (odometer scale-factor standard deviation), PPM
 
-# IMU噪声建模参数
-# IMU noise parameters
-imumodel:
-    arw: 0.24     # deg/sqrt(hr)
-    vrw: 0.24     # m/s/sqrt(hr)
-    gbstd: 50.0   # deg/hr
-    abstd: 250.0  # mGal
-    corrtime: 1.0 # hr
-
 # GNSS仿真中断配置
 # GNSS outage parameters
 isuseoutage: false
@@ -72,3 +110,6 @@ outageperiod: 180
 # a fixed threshold for GNSS outlier-culling using positioning standard deviation
 # must be set according to your own dataset
 gnssthreshold: 20.0
+
+
+
