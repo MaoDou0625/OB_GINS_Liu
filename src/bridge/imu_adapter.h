@@ -39,8 +39,11 @@ public:
 
     double endTime() const;
 
-    // 统一访问：当前状态（主IMU有效）。如未来接入轮IMU，将在内部完成转换或分流。
-    IntegrationState currentStateMain() const;
+    // 统一访问：当前状态
+    // - currentStateMain(): 若为轮式IMU，则做等价字段拷贝转换为主IMU结构返回
+    // - currentStateWheel(): 仅在 isWheel()==true 时有效
+    IntegrationState      currentStateMain() const;
+    WheelIntegrationState currentStateWheel() const;
 
     // 原生指针（供因子构建）。
     std::shared_ptr<PreintegrationBase> rawMain() const { return preint_main_; }
@@ -76,16 +79,19 @@ inline IntegrationState StateFromData(const IntegrationStateData &d, UnifiedPrei
     return Preintegration::stateFromData(d, opt);
 }
 
-// 统一创建因子（当前默认主IMU）。后续接入轮IMU时仅改此处逻辑。
+// 统一创建因子（根据 up->isWheel() 分流）。
 inline ceres::CostFunction *MakePreintFactor(const std::shared_ptr<UnifiedPreintegrator> &up) {
-    if (up && up->rawMain()) return new PreintegrationFactor(up->rawMain());
+    if (!up) return nullptr;
+    if (up->isWheel() && up->rawWheel()) return new WheelPreintegrationFactor(up->rawWheel());
+    if (up->rawMain()) return new PreintegrationFactor(up->rawMain());
     return nullptr;
 }
 
 inline ceres::CostFunction *MakeImuErrorFactor(const std::shared_ptr<UnifiedPreintegrator> &up) {
-    if (up && up->rawMain()) return new ImuErrorFactor(up->rawMain());
+    if (!up) return nullptr;
+    if (up->isWheel() && up->rawWheel()) return new WheelImuErrorFactor(up->rawWheel());
+    if (up->rawMain()) return new ImuErrorFactor(up->rawMain());
     return nullptr;
 }
 
 } // namespace Adapter
-

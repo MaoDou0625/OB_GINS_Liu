@@ -40,43 +40,71 @@ static WheelIntegrationState ToWheelState(const IntegrationState &s) {
     return w;
 }
 
+static inline void decodeOptions(UnifiedPreintegrator::Options opt, bool &use_odo, bool &use_earth) {
+    int v      = static_cast<int>(opt);
+    use_odo    = (v & 1) != 0; // ODO bit
+    use_earth  = (v & 2) != 0; // EARTH bit
+}
+
 std::shared_ptr<UnifiedPreintegrator>
 UnifiedPreintegrator::Create(const std::shared_ptr<IntegrationParameters> &params, const IMU &first_imu,
                              const IntegrationState &init_state, Options opt, bool is_wheel) {
     auto up = std::shared_ptr<UnifiedPreintegrator>(new UnifiedPreintegrator(is_wheel));
 
-    // 为保持主流程稳定，默认仍走主IMU预积分；
-    // 后续如需切换到轮IMU，可在此根据 is_wheel 创建 WheelPreintegration。
-    up->preint_main_ = Preintegration::createPreintegration(params, first_imu, init_state, opt);
+    bool use_odo = false, use_earth = false;
+    decodeOptions(opt, use_odo, use_earth);
 
-    // 预留：构建轮IMU预积分（暂不接入主流程参数块）
-    // if (is_wheel) {
-    //     auto wparams = std::make_shared<WheelIntegrationParameters>(ToWheelParams(params));
-    //     auto wstate  = ToWheelState(init_state);
-    //     up->preint_wheel_ = WheelPreintegration::createPreintegration(wparams, first_imu, wstate,
-    //                                                                   WheelPreintegration::getOptions(
-    //                                                                       (opt & Preintegration::PREINTEGRATION_ODO) != 0,
-    //                                                                       (opt & Preintegration::PREINTEGRATION_EARTH) != 0));
-    // }
+    if (is_wheel) {
+        auto wparams = std::make_shared<WheelIntegrationParameters>(ToWheelParams(params));
+        auto wstate  = ToWheelState(init_state);
+        auto wopt    = WheelPreintegration::getOptions(use_odo, use_earth);
+        up->preint_wheel_ = WheelPreintegration::createPreintegration(wparams, first_imu, wstate, wopt);
+    } else {
+        up->preint_main_ = Preintegration::createPreintegration(params, first_imu, init_state, opt);
+    }
 
     return up;
 }
 
 void UnifiedPreintegrator::addNewImu(const IMU &imu) {
-    if (preint_main_) preint_main_->addNewImu(imu);
-    // if (preint_wheel_) preint_wheel_->addNewImu(imu);
+    if (preint_wheel_) {
+        preint_wheel_->addNewImu(imu);
+    } else if (preint_main_) {
+        preint_main_->addNewImu(imu);
+    }
 }
 
 double UnifiedPreintegrator::endTime() const {
     if (preint_main_) return preint_main_->endTime();
-    // if (preint_wheel_) return preint_wheel_->endTime();
+    if (preint_wheel_) return preint_wheel_->endTime();
     return 0.0;
+}
+
+static IntegrationState FromWheel(const WheelIntegrationState &ws) {
+    IntegrationState s{};
+    s.time = ws.time;
+    s.p    = ws.p;
+    s.q    = ws.q;
+    s.v    = ws.v;
+    s.bg   = ws.bg;
+    s.ba   = ws.ba;
+    s.s    = ws.s;
+    s.sodo = ws.sodo;
+    s.abv  = ws.abv;
+    s.sg   = ws.sg;
+    s.sa   = ws.sa;
+    return s;
 }
 
 IntegrationState UnifiedPreintegrator::currentStateMain() const {
     if (preint_main_) return preint_main_->currentState();
+    if (preint_wheel_) return FromWheel(preint_wheel_->currentState());
+    return {};
+}
+
+WheelIntegrationState UnifiedPreintegrator::currentStateWheel() const {
+    if (preint_wheel_) return preint_wheel_->currentState();
     return {};
 }
 
 } // namespace Adapter
-
