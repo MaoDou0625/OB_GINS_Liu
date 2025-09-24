@@ -30,18 +30,21 @@ class ImuFileLoader : public FileLoader {
 
 public:
     ImuFileLoader() = delete;
-    ImuFileLoader(const string &filename, int columns, int rate = 200) {
+    ImuFileLoader(const string &filename, int columns, int rate = 200, bool is_wheel_source = false) {
         open(filename, columns, FileLoader::TEXT);
 
         dt_ = 1.0 / (double) rate;
 
         imu_.time = 0;
+        mark_wheel_ = is_wheel_source;
     }
 
     const IMU &next() {
         imu_pre_ = imu_;
 
         data_ = load();
+        // tag IMU source type for downstream use
+        imu_.is_wheel = mark_wheel_;
 
         // Debug 安全读取：按实际解析列数进行拷贝，防止越界
         const size_t n = data_.size();
@@ -80,6 +83,7 @@ public:
 
 private:
     double dt_;
+    bool mark_wheel_{false};
 
     IMU imu_, imu_pre_;
     vector<double> data_;
