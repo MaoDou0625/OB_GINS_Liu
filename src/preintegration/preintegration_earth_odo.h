@@ -1,24 +1,4 @@
-/*
- * OB_GINS: An Optimization-Based GNSS/INS Integrated Navigation System
- *
- * Copyright (C) 2022 i2Nav Group, Wuhan University
- *
- *     Author : Hailiang Tang
- *    Contact : thl@whu.edu.cn
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
+/* Main-IMU Preintegration with Earth rotation + odometer */
 
 #ifndef PREINTEGRATION_EARTH_ODO_H
 #define PREINTEGRATION_EARTH_ODO_H
@@ -28,7 +8,8 @@
 class PreintegrationEarthOdo : public PreintegrationBase {
 
 public:
-    PreintegrationEarthOdo(std::shared_ptr<IntegrationParameters> parameters, const IMU &imu0, IntegrationState state);
+    PreintegrationEarthOdo(std::shared_ptr<IntegrationParameters> parameters, const IMU &imu0,
+                            IntegrationState state);
 
     Eigen::MatrixXd evaluate(const IntegrationState &state0, const IntegrationState &state1,
                              double *residuals) override;
@@ -46,7 +27,8 @@ public:
 
     static IntegrationStateData stateToData(const IntegrationState &state);
     static IntegrationState stateFromData(const IntegrationStateData &data);
-    void constructState(const double *const *parameters, IntegrationState &state0, IntegrationState &state1) override;
+    void constructState(const double *const *parameters, IntegrationState &state0, 
+                        IntegrationState &state1) override;
 
     int imuErrorNumResiduals() override;
     vector<int> imuErrorNumBlocksParameters() override;

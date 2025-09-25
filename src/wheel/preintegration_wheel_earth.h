@@ -4,6 +4,7 @@
 #define WHEEL_PREINTEGRATION_EARTH_H
 
 #include "preintegration_wheel_base.h"
+#include "src/common/earth.h"
 
 class WheelPreintegrationEarth : public WheelPreintegrationBase {
 public:

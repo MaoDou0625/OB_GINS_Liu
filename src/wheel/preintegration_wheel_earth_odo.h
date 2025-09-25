@@ -6,6 +6,7 @@
 #include "preintegration_wheel_base.h"
 
 class WheelPreintegrationEarthOdo : public WheelPreintegrationBase {
+
 public:
     WheelPreintegrationEarthOdo(std::shared_ptr<WheelIntegrationParameters> parameters, const IMU &imu0,
                                 WheelIntegrationState state);
@@ -45,7 +46,7 @@ private:
     void setNoiseMatrix();
 
 public:
-    static constexpr int NUM_MIX = 12;
+    static constexpr int NUM_MIX = 10;
 
 private:
     static constexpr int NUM_STATE = 21;

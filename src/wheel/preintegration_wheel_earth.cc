@@ -1,4 +1,4 @@
-/* Wheel-IMU Preintegration Earth implementation */
+﻿/* Wheel-IMU Preintegration Earth implementation */
 
 #include "preintegration_wheel_earth.h"
 #include "src/common/earth.h"
@@ -124,7 +124,10 @@ Eigen::MatrixXd WheelPreintegrationEarth::residualJacobianMix0(const WheelIntegr
     jaco.block(3, 0, 3, 3) = -cnb0;
     jaco.block(3, 3, 3, 3) = -dv_dbg;
     jaco.block(3, 6, 3, 3) = -dv_dba;
-    jaco.block(6, 3, 3, 3) = -dq_dbg;
+    jaco.block(6, 3, 3, 3) =
+        (Rotation::quaternionleft(qb0b1_ * delta_state_.q).bottomRightCorner<3, 3>()) * dq_dbg;
+    jaco.block(9, 3, 3, 3)  = -Eigen::Matrix3d::Identity();
+    jaco.block(12, 6, 3, 3) = -Eigen::Matrix3d::Identity();
 
     jaco = sqrt_information_ * jaco;
     return jaco;
@@ -136,16 +139,21 @@ Eigen::MatrixXd WheelPreintegrationEarth::residualJacobianMix1(const WheelIntegr
     Eigen::Map<Eigen::Matrix<double, NUM_STATE, NUM_MIX, Eigen::RowMajor>> jaco(jacobian);
     jaco.setZero();
 
-    jaco.block(9, 0, 3, 3)  = Eigen::Matrix3d::Identity();
-    jaco.block(12, 3, 3, 3) = Eigen::Matrix3d::Identity();
+    jaco.block(3, 0, 3, 3)  = state0.q.inverse().toRotationMatrix();
+    jaco.block(9, 3, 3, 3)  = Eigen::Matrix3d::Identity();
+    jaco.block(12, 6, 3, 3) = Eigen::Matrix3d::Identity();
 
     jaco = sqrt_information_ * jaco;
     return jaco;
 }
 
-int WheelPreintegrationEarth::numResiduals() { return NUM_STATE; }
+int WheelPreintegrationEarth::numResiduals() { 
+    return NUM_STATE; 
+}
 
-std::vector<int> WheelPreintegrationEarth::numBlocksParameters() { return {NUM_POSE, NUM_MIX, NUM_POSE, NUM_MIX}; }
+std::vector<int> WheelPreintegrationEarth::numBlocksParameters() { 
+    return {NUM_POSE, NUM_MIX, NUM_POSE, NUM_MIX}; 
+}
 
 WheelIntegrationStateData WheelPreintegrationEarth::stateToData(const WheelIntegrationState &state) {
     WheelIntegrationStateData data{};
@@ -161,36 +169,21 @@ WheelIntegrationState WheelPreintegrationEarth::stateFromData(const WheelIntegra
 
 void WheelPreintegrationEarth::constructState(const double *const *parameters, WheelIntegrationState &state0,
                                               WheelIntegrationState &state1) {
-    WheelIntegrationStateData data0{}, data1{};
-    memcpy(data0.pose, parameters[0], sizeof(double) * NUM_POSE);
-    memcpy(data0.mix, parameters[1], sizeof(double) * NUM_MIX);
-    memcpy(data1.pose, parameters[2], sizeof(double) * NUM_POSE);
-    memcpy(data1.mix, parameters[3], sizeof(double) * NUM_MIX);
-    state0 = stateFromData(data0);
-    state1 = stateFromData(data1);
-}
+    state0 = WheelIntegrationState{
+        .p  = {parameters[0][0], parameters[0][1], parameters[0][2]},
+        .q  = {parameters[0][6], parameters[0][3], parameters[0][4], parameters[0][5]},
+        .v  = {parameters[1][0], parameters[1][1], parameters[1][2]},
+        .bg = {parameters[1][3], parameters[1][4], parameters[1][5]},
+        .ba = {parameters[1][6], parameters[1][7], parameters[1][8]},
+    };
 
-int WheelPreintegrationEarth::imuErrorNumResiduals() { return 6; }
-std::vector<int> WheelPreintegrationEarth::imuErrorNumBlocksParameters() { return std::vector<int>{NUM_MIX}; }
-
-void WheelPreintegrationEarth::imuErrorEvaluate(const double *const *parameters, double *residuals) {
-    residuals[0] = parameters[0][3] / IMU_GRY_BIAS_STD;
-    residuals[1] = parameters[0][4] / IMU_GRY_BIAS_STD;
-    residuals[2] = parameters[0][5] / IMU_GRY_BIAS_STD;
-    residuals[3] = parameters[0][6] / IMU_ACC_BIAS_STD;
-    residuals[4] = parameters[0][7] / IMU_ACC_BIAS_STD;
-    residuals[5] = parameters[0][8] / IMU_ACC_BIAS_STD;
-}
-
-void WheelPreintegrationEarth::imuErrorJacobian(double *jacobian) {
-    Eigen::Map<Eigen::Matrix<double, 6, NUM_MIX, Eigen::RowMajor>> jaco(jacobian);
-    jaco.setZero();
-    jaco(0, 3) = 1.0 / IMU_GRY_BIAS_STD;
-    jaco(1, 4) = 1.0 / IMU_GRY_BIAS_STD;
-    jaco(2, 5) = 1.0 / IMU_GRY_BIAS_STD;
-    jaco(3, 6) = 1.0 / IMU_ACC_BIAS_STD;
-    jaco(4, 7) = 1.0 / IMU_ACC_BIAS_STD;
-    jaco(5, 8) = 1.0 / IMU_ACC_BIAS_STD;
+    state1 = WheelIntegrationState{
+        .p  = {parameters[2][0], parameters[2][1], parameters[2][2]},
+        .q  = {parameters[2][6], parameters[2][3], parameters[2][4], parameters[2][5]},
+        .v  = {parameters[3][0], parameters[3][1], parameters[3][2]},
+        .bg = {parameters[3][3], parameters[3][4], parameters[3][5]},
+        .ba = {parameters[3][6], parameters[3][7], parameters[3][8]},
+    };
 }
 
 void WheelPreintegrationEarth::integrationProcess(unsigned long index) {
@@ -209,12 +202,14 @@ void WheelPreintegrationEarth::integrationProcess(unsigned long index) {
                     1.0 / 12.0 * (imu_pre.dtheta.cross(imu_cur.dvel) + imu_pre.dvel.cross(imu_cur.dtheta));
     Vector3d dv_cor_g = (gravity_ - 2.0 * iewn_.cross(current_state_.v)) * dt;
 
+    // earth rotation compensation
     Vector3d dnn    = -iewn_ * dt;
     Quaterniond qnn = Rotation::rotvec2quaternion(dnn);
 
     Vector3d dvel =
         0.5 * (Matrix3d::Identity() + qnn.toRotationMatrix()) * current_state_.q.toRotationMatrix() * dvfb + dv_cor_g;
 
+    // average velocity for position
     current_state_.p += dt * current_state_.v + 0.5 * dt * dvel;
     current_state_.v += dvel;
 
@@ -237,14 +232,20 @@ void WheelPreintegrationEarth::integrationProcess(unsigned long index) {
     updateJacobianAndCovariance(imu_pre, imu_cur);
 }
 
-void WheelPreintegrationEarth::resetState(const WheelIntegrationState &state) { resetState(state, NUM_STATE); }
+void WheelPreintegrationEarth::resetState(const WheelIntegrationState &state) {
+    resetState(state, NUM_STATE);
+}
 
 void WheelPreintegrationEarth::updateJacobianAndCovariance(const IMU &imu_pre, const IMU &imu_cur) {
+    // dp, dv, dq, dbg, dba
     Eigen::MatrixXd phi = Eigen::MatrixXd::Zero(NUM_STATE, NUM_STATE);
-    double dt          = imu_cur.dt;
-    Vector3d dnn       = -iewn_ * delta_time_;
+
+    double dt = imu_cur.dt;
+
+    Vector3d dnn  = -iewn_ * delta_time_;
     Matrix3d cbb0 = -(q0_.inverse() * Rotation::rotvec2quaternion(dnn) * q0_ * delta_state_.q).toRotationMatrix();
 
+    // jacobian: phi = I + F * dt
     phi.block<3, 3>(0, 0)   = Matrix3d::Identity();
     phi.block<3, 3>(0, 3)   = Matrix3d::Identity() * dt;
     phi.block<3, 3>(3, 3)   = Matrix3d::Identity();
@@ -257,6 +258,7 @@ void WheelPreintegrationEarth::updateJacobianAndCovariance(const IMU &imu_pre, c
 
     jacobian_ = phi * jacobian_;
 
+    // covariance
     Eigen::MatrixXd gt = Eigen::MatrixXd::Zero(NUM_STATE, NUM_NOISE);
     gt.block<3, 3>(3, 3)  = cbb0;
     gt.block<3, 3>(6, 0)  = -Matrix3d::Identity();
@@ -281,8 +283,11 @@ void WheelPreintegrationEarth::resetState(const WheelIntegrationState &state, in
 
     // absolute attitude at start of preintegration
     q0_ = current_state_.q;
+
+    // earth rotation, approximate with initial position
     iewn_      = Earth::iewn(parameters_->station, current_state_.p);
     iewn_skew_ = Rotation::skewSymmetric(iewn_);
+
     pn_.clear();
 }
 
@@ -294,4 +299,28 @@ void WheelPreintegrationEarth::setNoiseMatrix() {
         2 * parameters_->gyr_bias_std * parameters_->gyr_bias_std / parameters_->corr_time; // nbg
     noise_.block<3, 3>(9, 9) *=
         2 * parameters_->acc_bias_std * parameters_->acc_bias_std / parameters_->corr_time; // nba
+}
+
+int WheelPreintegrationEarth::imuErrorNumResiduals() { return 6; }
+
+std::vector<int> WheelPreintegrationEarth::imuErrorNumBlocksParameters() { return std::vector<int>{NUM_MIX}; }
+
+void WheelPreintegrationEarth::imuErrorEvaluate(const double *const *parameters, double *residuals) {
+    residuals[0] = parameters[0][3] / IMU_GRY_BIAS_STD;
+    residuals[1] = parameters[0][4] / IMU_GRY_BIAS_STD;
+    residuals[2] = parameters[0][5] / IMU_GRY_BIAS_STD;
+    residuals[3] = parameters[0][6] / IMU_ACC_BIAS_STD;
+    residuals[4] = parameters[0][7] / IMU_ACC_BIAS_STD;
+    residuals[5] = parameters[0][8] / IMU_ACC_BIAS_STD;
+}
+
+void WheelPreintegrationEarth::imuErrorJacobian(double *jacobian) {
+    Eigen::Map<Eigen::Matrix<double, 6, NUM_MIX, Eigen::RowMajor>> jaco(jacobian);
+    jaco.setZero();
+    jaco(0, 3) = 1.0 / IMU_GRY_BIAS_STD;
+    jaco(1, 4) = 1.0 / IMU_GRY_BIAS_STD;
+    jaco(2, 5) = 1.0 / IMU_GRY_BIAS_STD;
+    jaco(3, 6) = 1.0 / IMU_ACC_BIAS_STD;
+    jaco(4, 7) = 1.0 / IMU_ACC_BIAS_STD;
+    jaco(5, 8) = 1.0 / IMU_ACC_BIAS_STD;
 }
