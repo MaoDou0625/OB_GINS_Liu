@@ -3,6 +3,7 @@
  */
 
 #include "imu_adapter.h"
+#include "src/common/debug.h"
 
 namespace Adapter {
 
@@ -55,11 +56,15 @@ UnifiedPreintegrator::Create(const std::shared_ptr<IntegrationParameters> &param
     decodeOptions(opt, use_odo, use_earth);
 
     if (is_wheel) {
+        DBG_LOG(2, "ADAPTER", "Create wheel preintegration: t0=" << first_imu.time
+                << ", dt0=" << first_imu.dt << ", use_odo=" << use_odo << ", use_earth=" << use_earth);
         auto wparams = std::make_shared<WheelIntegrationParameters>(ToWheelParams(params));
         auto wstate  = ToWheelState(init_state);
         auto wopt    = WheelPreintegration::getOptions(use_odo, use_earth);
         up->preint_wheel_ = WheelPreintegration::createPreintegration(wparams, first_imu, wstate, wopt);
     } else {
+        DBG_LOG(2, "ADAPTER", "Create main preintegration: t0=" << first_imu.time
+                << ", dt0=" << first_imu.dt << ", use_odo=" << use_odo << ", use_earth=" << use_earth);
         up->preint_main_ = Preintegration::createPreintegration(params, first_imu, init_state, opt);
     }
 

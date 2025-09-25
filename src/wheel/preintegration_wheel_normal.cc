@@ -11,7 +11,7 @@ WheelPreintegrationNormal::WheelPreintegrationNormal(std::shared_ptr<WheelIntegr
     // Reset state
     resetState(current_state_, NUM_STATE);
 
-    // Set initial noise matrix
+    // Set initial noise matrix (mirror main IMU normal)
     setNoiseMatrix();
 }
 
@@ -154,34 +154,30 @@ void WheelPreintegrationNormal::constructState(const double *const *parameters, 
     state1 = stateFromData(data1);
 }
 
-int WheelPreintegrationNormal::imuErrorNumResiduals() {
-    return 6;
-}
+int WheelPreintegrationNormal::imuErrorNumResiduals() { return 6; }
 
-std::vector<int> WheelPreintegrationNormal::imuErrorNumBlocksParameters() {
-    return {3, 3};
-}
+// Mirror main-IMU: single mix block
+std::vector<int> WheelPreintegrationNormal::imuErrorNumBlocksParameters() { return std::vector<int>{NUM_MIX}; }
 
+// Mirror main-IMU: residual = [bg; ba] scaled by 1/std from mix[3..8]
 void WheelPreintegrationNormal::imuErrorEvaluate(const double *const *parameters, double *residuals) {
-    // gyr bias + acc bias
-    Eigen::Map<const Eigen::Vector3d> bg(parameters[0]);
-    Eigen::Map<const Eigen::Vector3d> ba(parameters[1]);
-
-    Eigen::Map<Eigen::Matrix<double, 6, 1>> residual(residuals);
-    residual.block<3, 1>(0, 0) = bg;
-    residual.block<3, 1>(3, 0) = ba;
-
-    Eigen::Matrix<double, 6, 6> sqrt_information = Eigen::Matrix<double, 6, 6>::Zero();
-    sqrt_information.block<3, 3>(0, 0) = Eigen::Matrix3d::Identity() * IMU_GRY_BIAS_STD;
-    sqrt_information.block<3, 3>(3, 0) = Eigen::Matrix3d::Identity() * IMU_ACC_BIAS_STD;
-    residual = sqrt_information * residual;
+    residuals[0] = parameters[0][3] / IMU_GRY_BIAS_STD;
+    residuals[1] = parameters[0][4] / IMU_GRY_BIAS_STD;
+    residuals[2] = parameters[0][5] / IMU_GRY_BIAS_STD;
+    residuals[3] = parameters[0][6] / IMU_ACC_BIAS_STD;
+    residuals[4] = parameters[0][7] / IMU_ACC_BIAS_STD;
+    residuals[5] = parameters[0][8] / IMU_ACC_BIAS_STD;
 }
 
 void WheelPreintegrationNormal::imuErrorJacobian(double *jacobian) {
-    Eigen::Map<Eigen::Matrix<double, 6, 6, Eigen::RowMajor>> jaco(jacobian);
+    Eigen::Map<Eigen::Matrix<double, 6, NUM_MIX, Eigen::RowMajor>> jaco(jacobian);
     jaco.setZero();
-    jaco.block<3, 3>(0, 0) = Eigen::Matrix3d::Identity() * IMU_GRY_BIAS_STD;
-    jaco.block<3, 3>(3, 3) = Eigen::Matrix3d::Identity() * IMU_ACC_BIAS_STD;
+    jaco(0, 3) = 1.0 / IMU_GRY_BIAS_STD;
+    jaco(1, 4) = 1.0 / IMU_GRY_BIAS_STD;
+    jaco(2, 5) = 1.0 / IMU_GRY_BIAS_STD;
+    jaco(3, 6) = 1.0 / IMU_ACC_BIAS_STD;
+    jaco(4, 7) = 1.0 / IMU_ACC_BIAS_STD;
+    jaco(5, 8) = 1.0 / IMU_ACC_BIAS_STD;
 }
 
 void WheelPreintegrationNormal::integrationProcess(unsigned long index) {
@@ -201,55 +197,33 @@ void WheelPreintegrationNormal::resetState(const WheelIntegrationState &state) {
 }
 
 void WheelPreintegrationNormal::updateJacobianAndCovariance(const IMU &imu_pre, const IMU &imu_cur) {
-    // two-sample correction for angular velocity
-    Vector3d dtheta = imu_cur.dtheta + 1.0 / 12.0 * imu_pre.dtheta.cross(imu_cur.dtheta);
+    // Mirror main IMU: use phi/gt discretization + Qk
+    Eigen::MatrixXd phi = Eigen::MatrixXd::Zero(NUM_STATE, NUM_STATE);
+    double dt           = imu_cur.dt;
 
-    Quaterniond dq = Rotation::rotvec2quaternion(dtheta);
-    Matrix3d r     = Rotation::quaternion2matrix(dq);
+    // phi = I + F*dt
+    phi.block<3, 3>(0, 0)   = Matrix3d::Identity();
+    phi.block<3, 3>(0, 3)   = Matrix3d::Identity() * dt;
+    phi.block<3, 3>(3, 3)   = Matrix3d::Identity();
+    phi.block<3, 3>(3, 6)   = -delta_state_.q.toRotationMatrix() * Rotation::skewSymmetric(imu_cur.dvel);
+    phi.block<3, 3>(3, 12)  = -delta_state_.q.toRotationMatrix() * dt;
+    phi.block<3, 3>(6, 6)   = Matrix3d::Identity() - Rotation::skewSymmetric(imu_cur.dtheta);
+    phi.block<3, 3>(6, 9)   = -Matrix3d::Identity() * dt;
+    phi.block<3, 3>(9, 9)   = Matrix3d::Identity() * (1 - dt / parameters_->corr_time);
+    phi.block<3, 3>(12, 12) = Matrix3d::Identity() * (1 - dt / parameters_->corr_time);
 
-    Matrix3d dp_dbg, dp_dba, dv_dbg, dv_dba;
-    Matrix3d dq_dbg;
+    jacobian_ = phi * jacobian_;
 
-    dp_dbg = jacobian_.block<3, 3>(0, 9);
-    dp_dba = jacobian_.block<3, 3>(0, 12);
-    dv_dbg = jacobian_.block<3, 3>(3, 9);
-    dv_dba = jacobian_.block<3, 3>(3, 12);
-    dq_dbg = jacobian_.block<3, 3>(6, 9);
+    // noise mapping
+    Eigen::MatrixXd gt = Eigen::MatrixXd::Zero(NUM_STATE, NUM_NOISE);
+    gt.block<3, 3>(3, 3)  = delta_state_.q.toRotationMatrix();
+    gt.block<3, 3>(6, 0)  = Matrix3d::Identity();
+    gt.block<3, 3>(9, 6)  = Matrix3d::Identity();
+    gt.block<3, 3>(12, 9) = Matrix3d::Identity();
 
-    // Jacobian
-    jacobian_.block<3, 3>(0, 0)   = Matrix3d::Identity();
-    jacobian_.block<3, 3>(0, 3)   = Matrix3d::Identity() * imu_cur.dt;
-    jacobian_.block<3, 3>(0, 6)   = Matrix3d::Zero();
-    jacobian_.block<3, 3>(0, 9)   = dp_dbg - 0.5 * Rotation::skewSymmetric(imu_cur.dvel) * imu_cur.dt -
-                                   1.0 / 12.0 * Rotation::skewSymmetric(imu_pre.dvel) * imu_cur.dt +
-                                   1.0 / 12.0 * Rotation::skewSymmetric(imu_cur.dvel) * imu_pre.dt;
-    jacobian_.block<3, 3>(0, 12)  = dp_dba + 0.5 * Matrix3d::Identity() * imu_cur.dt +
-                                   1.0 / 12.0 * r * Matrix3d::Identity() * imu_pre.dt -
-                                   1.0 / 12.0 * Matrix3d::Identity() * imu_cur.dt;
-    jacobian_.block<3, 3>(3, 0)   = Matrix3d::Zero();
-    jacobian_.block<3, 3>(3, 3)   = Matrix3d::Identity();
-    jacobian_.block<3, 3>(3, 6)   = Matrix3d::Zero();
-    jacobian_.block<3, 3>(3, 9)   = dv_dbg - Rotation::skewSymmetric(imu_cur.dvel) +
-                                   1.0 / 12.0 * Rotation::skewSymmetric(imu_pre.dvel);
-    jacobian_.block<3, 3>(3, 12)  = dv_dba + Matrix3d::Identity();
-    jacobian_.block<3, 3>(6, 0)   = Matrix3d::Zero();
-    jacobian_.block<3, 3>(6, 3)   = Matrix3d::Zero();
-    jacobian_.block<3, 3>(6, 6)   = r.transpose();
-    jacobian_.block<3, 3>(6, 9)   = dq_dbg + Matrix3d::Identity() * imu_cur.dt;
-    jacobian_.block<3, 3>(6, 12)  = Matrix3d::Zero();
-    jacobian_.block<3, 3>(9, 0)   = Matrix3d::Zero();
-    jacobian_.block<3, 3>(9, 3)   = Matrix3d::Zero();
-    jacobian_.block<3, 3>(9, 6)   = Matrix3d::Zero();
-    jacobian_.block<3, 3>(9, 9)   = Matrix3d::Identity();
-    jacobian_.block<3, 3>(9, 12)  = Matrix3d::Zero();
-    jacobian_.block<3, 3>(12, 0)  = Matrix3d::Zero();
-    jacobian_.block<3, 3>(12, 3)  = Matrix3d::Zero();
-    jacobian_.block<3, 3>(12, 6)  = Matrix3d::Zero();
-    jacobian_.block<3, 3>(12, 9)  = Matrix3d::Zero();
-    jacobian_.block<3, 3>(12, 12) = Matrix3d::Identity();
-
-    // Covariance
-    covariance_ = jacobian_ * covariance_ * jacobian_.transpose() + noise_;
+    Eigen::MatrixXd Qk =
+        0.5 * dt * (phi * gt * noise_ * gt.transpose() + gt * noise_ * gt.transpose() * phi.transpose());
+    covariance_ = phi * covariance_ * phi.transpose() + Qk;
 }
 
 void WheelPreintegrationNormal::resetState(const WheelIntegrationState &state, int num) {
@@ -271,16 +245,12 @@ void WheelPreintegrationNormal::resetState(const WheelIntegrationState &state, i
 }
 
 void WheelPreintegrationNormal::setNoiseMatrix() {
-    double vrw = parameters_->acc_vrw;
-    double arw = parameters_->gyr_arw;
-
-    double dt = 1.0; // will be scaled each step in updateJacobianAndCovariance
-
-    noise_.setZero(NUM_STATE, NUM_STATE);
-    noise_.block<3, 3>(0, 0)   = Eigen::Matrix3d::Identity() * vrw * vrw * dt * dt;
-    noise_.block<3, 3>(3, 3)   = Eigen::Matrix3d::Identity() * vrw * vrw * dt;
-    noise_.block<3, 3>(6, 6)   = Eigen::Matrix3d::Identity() * arw * arw * dt;
-    noise_.block<3, 3>(9, 9)   = Eigen::Matrix3d::Identity() * IMU_GRY_BIAS_STD * IMU_GRY_BIAS_STD * dt;
-    noise_.block<3, 3>(12, 12) = Eigen::Matrix3d::Identity() * IMU_ACC_BIAS_STD * IMU_ACC_BIAS_STD * dt;
+    // Mirror main IMU normal
+    noise_.setIdentity(NUM_NOISE, NUM_NOISE);
+    noise_.block<3, 3>(0, 0) *= parameters_->gyr_arw * parameters_->gyr_arw; // nw
+    noise_.block<3, 3>(3, 3) *= parameters_->acc_vrw * parameters_->acc_vrw; // na
+    noise_.block<3, 3>(6, 6) *=
+        2 * parameters_->gyr_bias_std * parameters_->gyr_bias_std / parameters_->corr_time; // nbg
+    noise_.block<3, 3>(9, 9) *=
+        2 * parameters_->acc_bias_std * parameters_->acc_bias_std / parameters_->corr_time; // nba
 }
-

@@ -1,24 +1,4 @@
-/*
- * OB_GINS: An Optimization-Based GNSS/INS Integrated Navigation System
- *
- * Copyright (C) 2022 i2Nav Group, Wuhan University
- *
- *     Author : Hailiang Tang
- *    Contact : thl@whu.edu.cn
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
+/* Main-IMU Preintegration Earth implementation */
 
 #include "preintegration_earth.h"
 
@@ -108,7 +88,8 @@ Eigen::MatrixXd PreintegrationEarth::residualJacobianPose0(const IntegrationStat
 }
 
 Eigen::MatrixXd PreintegrationEarth::residualJacobianPose1(const IntegrationState &state0,
-                                                           const IntegrationState &state1, double *jacobian) {
+                                                           const IntegrationState &state1, 
+                                                           double *jacobian) {
     Eigen::Map<Eigen::Matrix<double, NUM_STATE, NUM_POSE, Eigen::RowMajor>> jaco(jacobian);
     jaco.setZero();
 
@@ -123,7 +104,8 @@ Eigen::MatrixXd PreintegrationEarth::residualJacobianPose1(const IntegrationStat
 }
 
 Eigen::MatrixXd PreintegrationEarth::residualJacobianMix0(const IntegrationState &state0,
-                                                          const IntegrationState &state1, double *jacobian) {
+                                                          const IntegrationState &state1, 
+                                                          double *jacobian) {
     Eigen::Map<Eigen::Matrix<double, NUM_STATE, NUM_MIX, Eigen::RowMajor>> jaco(jacobian);
     jaco.setZero();
 
@@ -150,7 +132,8 @@ Eigen::MatrixXd PreintegrationEarth::residualJacobianMix0(const IntegrationState
 }
 
 Eigen::MatrixXd PreintegrationEarth::residualJacobianMix1(const IntegrationState &state0,
-                                                          const IntegrationState &state1, double *jacobian) {
+                                                          const IntegrationState &state1,
+                                                           double *jacobian) {
     Eigen::Map<Eigen::Matrix<double, NUM_STATE, NUM_MIX, Eigen::RowMajor>> jaco(jacobian);
     jaco.setZero();
 

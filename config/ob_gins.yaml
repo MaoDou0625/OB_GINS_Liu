@@ -12,7 +12,8 @@ outputpath: "D:/Code/dataset/wheel-ins2_dataset/converted/out/C1-Test"
 
 # multi-IMU independent configs (main/left/right)
 imu_main:
-  file: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Body-IMU/C1_imu_increments.txt"
+  #file: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Body-IMU/C1_imu_increments.txt"
+  file: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Wheel-IMU-Left/C1_imu_increments.txt"
   columns: 7
   rate_hz: 200
   imunoise:
@@ -113,3 +114,9 @@ gnssthreshold: 20.0
 
 
 
+
+# 调试开关（可选）
+debug:
+  enable: false         # 总开关，true 时打印调试信息
+  level: 3              # 调试级别：1=概要 2=详细 3=更详细
+  dual_chain: false    # 在轮式IMU数据上并行运行主IMU链做对比
