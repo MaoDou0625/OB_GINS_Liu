@@ -708,13 +708,21 @@ int main(int argc, char *argv[]) {
 
                 // write results at boundary（主链 + 可选左右轮链）
                 writeNavResult(*timelist.rbegin(), station_origin, statelist_main[preint_main.size()], navfile, errfile);
-                if (save_multi_imu && use_wheel_left && navfile_left.isOpen() && errfile_left.isOpen()) {
+                if (save_multi_imu && use_wheel_left) {
+                    if (!navfile_left.isOpen()) navfile_left.open(outputpath + "/OB_GINS_TXT_left.nav", 11, FileSaver::TEXT);
+                    if (!errfile_left.isOpen()) errfile_left.open(outputpath + "/OB_GINS_IMU_ERR_left.bin", 7, FileSaver::BINARY);
+                    if (navfile_left.isOpen() && errfile_left.isOpen()) {
                     auto stL = statelist_left[preint_left.size()];
                     writeNavResultWheel(*timelist.rbegin(), station_origin, stL, navfile_left, errfile_left);
+                    }
                 }
-                if (save_multi_imu && use_wheel_right && navfile_right.isOpen() && errfile_right.isOpen()) {
+                if (save_multi_imu && use_wheel_right) {
+                    if (!navfile_right.isOpen()) navfile_right.open(outputpath + "/OB_GINS_TXT_right.nav", 11, FileSaver::TEXT);
+                    if (!errfile_right.isOpen()) errfile_right.open(outputpath + "/OB_GINS_IMU_ERR_right.bin", 7, FileSaver::BINARY);
+                    if (navfile_right.isOpen() && errfile_right.isOpen()) {
                     auto stR = statelist_right[preint_right.size()];
                     writeNavResultWheel(*timelist.rbegin(), station_origin, stR, navfile_right, errfile_right);
+                    }
                 }
 
                 // start next segment preintegrations
@@ -731,13 +739,21 @@ int main(int argc, char *argv[]) {
                 auto integration = *preint_main.rbegin();
                 double t_out = integration->endTime();
                 writeNavResult(t_out, station_origin, integration->currentStateMain(), navfile, errfile);
-                if (save_multi_imu && use_wheel_left && navfile_left.isOpen() && errfile_left.isOpen()) {
-                    auto stL = preint_left.back()->currentStateWheel();
-                    writeNavResultWheel(t_out, station_origin, stL, navfile_left, errfile_left);
+                if (save_multi_imu && use_wheel_left) {
+                    if (!navfile_left.isOpen()) navfile_left.open(outputpath + "/OB_GINS_TXT_left.nav", 11, FileSaver::TEXT);
+                    if (!errfile_left.isOpen()) errfile_left.open(outputpath + "/OB_GINS_IMU_ERR_left.bin", 7, FileSaver::BINARY);
+                    if (navfile_left.isOpen() && errfile_left.isOpen()) {
+                        auto stL = preint_left.back()->currentStateWheel();
+                        writeNavResultWheel(t_out, station_origin, stL, navfile_left, errfile_left);
+                    }
                 }
-                if (save_multi_imu && use_wheel_right && navfile_right.isOpen() && errfile_right.isOpen()) {
-                    auto stR = preint_right.back()->currentStateWheel();
-                    writeNavResultWheel(t_out, station_origin, stR, navfile_right, errfile_right);
+                if (save_multi_imu && use_wheel_right) {
+                    if (!navfile_right.isOpen()) navfile_right.open(outputpath + "/OB_GINS_TXT_right.nav", 11, FileSaver::TEXT);
+                    if (!errfile_right.isOpen()) errfile_right.open(outputpath + "/OB_GINS_IMU_ERR_right.bin", 7, FileSaver::BINARY);
+                    if (navfile_right.isOpen() && errfile_right.isOpen()) {
+                        auto stR = preint_right.back()->currentStateWheel();
+                        writeNavResultWheel(t_out, station_origin, stR, navfile_right, errfile_right);
+                    }
                 }
             }
         }
@@ -1108,8 +1124,23 @@ int main(int argc, char *argv[]) {
                     Adapter::StateFromData(statedatalist[preintegrationlist.size()], preintegration_options);
             }
 
-            // write result
+            // write result（主链）
             writeNavResult(*timelist.rbegin(), station_origin, state_curr, navfile, errfile);
+            // 单链路径：如是轮式链且开启保存，则懒加载打开附链文件并写入
+            if (save_multi_imu && imu_pre.is_wheel) {
+                if (use_wheel_left) {
+                    if (!navfile_left.isOpen()) navfile_left.open(outputpath + "/OB_GINS_TXT_left.nav", 11, FileSaver::TEXT);
+                    if (!errfile_left.isOpen()) errfile_left.open(outputpath + "/OB_GINS_IMU_ERR_left.bin", 7, FileSaver::BINARY);
+                    if (navfile_left.isOpen() && errfile_left.isOpen())
+                        writeNavResult(*timelist.rbegin(), station_origin, state_curr, navfile_left, errfile_left);
+                }
+                if (use_wheel_right) {
+                    if (!navfile_right.isOpen()) navfile_right.open(outputpath + "/OB_GINS_TXT_right.nav", 11, FileSaver::TEXT);
+                    if (!errfile_right.isOpen()) errfile_right.open(outputpath + "/OB_GINS_IMU_ERR_right.bin", 7, FileSaver::BINARY);
+                    if (navfile_right.isOpen() && errfile_right.isOpen())
+                        writeNavResult(*timelist.rbegin(), station_origin, state_curr, navfile_right, errfile_right);
+                }
+            }
 
             preintegrationlist.emplace_back(
                 Adapter::UnifiedPreintegrator::Create(parameters, imu_pre, state_curr, preintegration_options,
@@ -1120,12 +1151,32 @@ int main(int argc, char *argv[]) {
             }
         } else {
             auto integration = *preintegrationlist.rbegin();
-            writeNavResult(integration->endTime(), station_origin, integration->currentStateMain(), navfile, errfile);
+            double t_out = integration->endTime();
+            auto st_main = integration->currentStateMain();
+            writeNavResult(t_out, station_origin, st_main, navfile, errfile);
+            if (save_multi_imu && imu_pre.is_wheel) {
+                if (use_wheel_left) {
+                    if (!navfile_left.isOpen()) navfile_left.open(outputpath + "/OB_GINS_TXT_left.nav", 11, FileSaver::TEXT);
+                    if (!errfile_left.isOpen()) errfile_left.open(outputpath + "/OB_GINS_IMU_ERR_left.bin", 7, FileSaver::BINARY);
+                    if (navfile_left.isOpen() && errfile_left.isOpen())
+                        writeNavResult(t_out, station_origin, st_main, navfile_left, errfile_left);
+                }
+                if (use_wheel_right) {
+                    if (!navfile_right.isOpen()) navfile_right.open(outputpath + "/OB_GINS_TXT_right.nav", 11, FileSaver::TEXT);
+                    if (!errfile_right.isOpen()) errfile_right.open(outputpath + "/OB_GINS_IMU_ERR_right.bin", 7, FileSaver::BINARY);
+                    if (navfile_right.isOpen() && errfile_right.isOpen())
+                        writeNavResult(t_out, station_origin, st_main, navfile_right, errfile_right);
+                }
+            }
         }
     }
 
     navfile.close();
     errfile.close();
+    if (navfile_left.isOpen()) navfile_left.close();
+    if (errfile_left.isOpen()) errfile_left.close();
+    if (navfile_right.isOpen()) navfile_right.close();
+    if (errfile_right.isOpen()) errfile_right.close();
     imufile.close();
     gnssfile.close();
 

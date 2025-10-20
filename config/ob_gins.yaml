@@ -62,6 +62,8 @@ endtime: 132225
 ## 可选：关键帧时间间隔（秒），默认 1.0；设置为 0.05 可约 20 Hz
 kf_interval_sec: 1
 
+# 是否保存多IMU结果
+save_multi_imu: true
 # 迭代次数
 # number of iterations
 num_iterations: 20
