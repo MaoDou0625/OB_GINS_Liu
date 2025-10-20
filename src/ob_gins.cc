@@ -380,94 +380,7 @@ int main(int argc, char *argv[]) {
             parameters, imu_pre_main, state_curr_main, preintegration_options, false));
         if (use_wheel_left)
             preint_left.emplace_back(Adapter::UnifiedPreintegrator::Create(
-                parameters, imu_pre_left, state_curr_main, preintegration_options, true));
-        if (use_wheel_right)
-            preint_right.emplace_back(Adapter::UnifiedPreintegrator::Create(
-                parameters, imu_pre_right, state_curr_main, preintegration_options, true));
-
-        // prime next gnss
-        gnss                = gnssfile.next();
-        parameters->gravity = Earth::gravity(gnss.blh);
-        gnss.blh            = Earth::global2local(station_origin, gnss.blh);
-
-        std::shared_ptr<MarginalizationInfo> last_marginalization_info;
-        std::vector<double *> last_marginalization_parameter_blocks;
-
-        sow += integration_length;
-
-        while (true) {
-            if ((imu_cur_main.time > endtime) || imufile_main->isEof()) {
-                break;
-            }
-
-            // feed master (main) stream
-            preint_main.back()->addNewImu(imu_cur_main);
-            imu_pre_main = imu_cur_main;
-            imu_cur_main = imufile_main->next();
-
-            if (imu_cur_main.time > sow) {
-                // GNSS alignment
-                if (fabs(gnss.time - sow) < MINIMUM_INTERVAL) {
-                    gnsslist.push_back(gnss);
-                    gnss = gnssfile.next();
-                    while ((gnss.std[0] > gnssthreshold) || (gnss.std[1] > gnssthreshold) || (gnss.std[2] > gnssthreshold)) {
-                        gnss = gnssfile.next();
-                    }
-                    if (isuseoutage) {
-                        if (lround(gnss.time) == outagetime) {
-                            std::cout << "GNSS outage at " << outagetime << " s" << std::endl;
-                            for (int k = 0; k < outagelen; k++) { gnss = gnssfile.next(); }
-                            outagetime += outageperiod;
-                        }
-                    }
-                    parameters->gravity = Earth::gravity(gnss.blh);
-                    gnss.blh            = Earth::global2local(station_origin, gnss.blh);
-                    if (gnssfile.isEof()) { gnss.time = 0; }
-                }
-
-                // boundary interpolation for main
-                int isneed = isNeedInterpolation(imu_pre_main, imu_cur_main, sow);
-                if (isneed == 1) {
-                    preint_main.back()->addNewImu(imu_cur_main);
-                    imu_pre_main = imu_cur_main; imu_cur_main = imufile_main->next();
-                } else if (isneed == 2) {
-                    imuInterpolation(imu_cur_main, imu_pre_main, imu_cur_main, sow);
-                    preint_main.back()->addNewImu(imu_pre_main);
-                }
-
-                // catch up wheel-left/right to boundary
-                if (use_wheel_left && imufile_left) {
-                    while (imu_cur_left.time <= sow) { preint_left.back()->addNewImu(imu_cur_left); imu_pre_left = imu_cur_left; imu_cur_left = imufile_left->next(); }
-                    int needL = isNeedInterpolation(imu_pre_left, imu_cur_left, sow);
-                    if (needL == 1) { preint_left.back()->addNewImu(imu_cur_left); imu_pre_left = imu_cur_left; imu_cur_left = imufile_left->next(); }
-                    else if (needL == 2) { imuInterpolation(imu_cur_left, imu_pre_left, imu_cur_left, sow); preint_left.back()->addNewImu(imu_pre_left); }
-                }
-                if (use_wheel_right && imufile_right) {
-                    while (imu_cur_right.time <= sow) { preint_right.back()->addNewImu(imu_cur_right); imu_pre_right = imu_cur_right; imu_cur_right = imufile_right->next(); }
-                    int needR = isNeedInterpolation(imu_pre_right, imu_cur_right, sow);
-                    if (needR == 1) { preint_right.back()->addNewImu(imu_cur_right); imu_pre_right = imu_cur_right; imu_cur_right = imufile_right->next(); }
-                    else if (needR == 2) { imuInterpolation(imu_cur_right, imu_pre_right, imu_cur_right, sow); preint_right.back()->addNewImu(imu_pre_right); }
-                }
-
-                // push time node
-                timelist.push_back(sow);
-                // 杈撳嚭杩愯杩涘害锛堝閾撅級
-                {
-                    static int lastpercent = -1;
-                    int percent = int(((timelist.back() - starttime) * 100.0) / (endtime - starttime));
-                    if (percent < 0) percent = 0; if (percent > 100) percent = 100;
-                    if (percent != lastpercent) {
-                        lastpercent = percent;
-                        std::cout << "Percentage: " << std::setw(3) << percent << "%\r";
-                        flush(std::cout);
-                    }
-                }
-                sow += integration_length;
-
-                // fill end states
-                auto st_main = preint_main.back()->currentStateMain();
-                statelist_main[preint_main.size()]     = st_main;
-                statedatalist_main[preint_main.size()] = Adapter::StateToData(st_main, preintegration_options);
+                        parameters, imu_pre_left, statelist_left[preint_left.size()], preintegration_options, true));
                 if (use_wheel_left) {
                     auto st = preint_left.back()->currentStateWheel();
                     statelist_left[preint_left.size()]     = st;
@@ -730,10 +643,10 @@ int main(int argc, char *argv[]) {
                     parameters, imu_pre_main, statelist_main[preint_main.size()], preintegration_options, false));
                 if (use_wheel_left)
                     preint_left.emplace_back(Adapter::UnifiedPreintegrator::Create(
-                        parameters, imu_pre_left, statelist_main[preint_main.size()], preintegration_options, true));
+                        parameters, imu_pre_left, statelist_left[preint_left.size()], preintegration_options, true));
                 if (use_wheel_right)
                     preint_right.emplace_back(Adapter::UnifiedPreintegrator::Create(
-                        parameters, imu_pre_right, statelist_main[preint_main.size()], preintegration_options, true));
+                        parameters, imu_pre_right, statelist_right[preint_right.size()], preintegration_options, true));
             } else {
                 // streaming output between keyframes（主链 + 可选左右轮链）
                 auto integration = *preint_main.rbegin();
@@ -1319,6 +1232,8 @@ int isNeedInterpolation(const IMU &imu0, const IMU &imu1, double mid) {
 
     return 0;
 }
+
+
 
 
 
