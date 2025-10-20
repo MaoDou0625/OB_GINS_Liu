@@ -59,12 +59,41 @@ inline int NumMixParameter(UnifiedPreintegrator::Options options) {
     return Preintegration::numMixParameter(options);
 }
 
+// Wheel-IMU parameter sizing helpers (mirror main IMU helpers)
+inline int NumPoseParameterWheel() { return WheelPreintegration::numPoseParameter(); }
+
+inline int NumMixParameterWheel(UnifiedPreintegrator::Options options) {
+    // options encodes two flags like Preintegration::getOptions: bit0=ODO, bit1=EARTH
+    const int v = static_cast<int>(options);
+    const bool use_odo = (v & 1) != 0;
+    const bool use_earth = (v & 2) != 0;
+    auto wopt = WheelPreintegration::getOptions(use_odo, use_earth);
+    return WheelPreintegration::numMixParameter(wopt);
+}
+
 inline IntegrationStateData StateToData(const IntegrationState &s, UnifiedPreintegrator::Options opt) {
     return Preintegration::stateToData(s, opt);
 }
 
 inline IntegrationState StateFromData(const IntegrationStateData &d, UnifiedPreintegrator::Options opt) {
     return Preintegration::stateFromData(d, opt);
+}
+
+// Wheel-IMU state/data helpers
+inline WheelIntegrationStateData StateToDataWheel(const WheelIntegrationState &s, UnifiedPreintegrator::Options opt) {
+    const int v = static_cast<int>(opt);
+    const bool use_odo = (v & 1) != 0;
+    const bool use_earth = (v & 2) != 0;
+    auto wopt = WheelPreintegration::getOptions(use_odo, use_earth);
+    return WheelPreintegration::stateToData(s, wopt);
+}
+
+inline WheelIntegrationState StateFromDataWheel(const WheelIntegrationStateData &d, UnifiedPreintegrator::Options opt) {
+    const int v = static_cast<int>(opt);
+    const bool use_odo = (v & 1) != 0;
+    const bool use_earth = (v & 2) != 0;
+    auto wopt = WheelPreintegration::getOptions(use_odo, use_earth);
+    return WheelPreintegration::stateFromData(d, wopt);
 }
 
 inline ceres::CostFunction *MakePreintFactor(const std::shared_ptr<UnifiedPreintegrator> &up) {

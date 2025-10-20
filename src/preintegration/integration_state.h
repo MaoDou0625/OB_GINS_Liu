@@ -36,7 +36,7 @@ typedef struct IntegrationState {
     double time;
 
     Vector3d p{0, 0, 0};
-    Quaterniond q{0, 0, 0, 0};
+    Quaterniond q{1, 0, 0, 0};
     Vector3d v{0, 0, 0};
 
     Vector3d bg{0, 0, 0};
