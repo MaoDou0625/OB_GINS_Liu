@@ -1,4 +1,4 @@
-/*
+﻿/*
  * OB_GINS: An Optimization-Based GNSS/INS Integrated Navigation System
  *
  * Copyright (C) 2022 i2Nav Group, Wuhan University
@@ -64,6 +64,29 @@ void writeNavResult(double time, const Vector3d &origin, const IntegrationState 
 void writeNavResultWheel(double time, const Vector3d &origin, const WheelIntegrationState &state, FileSaver &navfile,
                          FileSaver &errfile);
 
+// YAML 瀹夊叏璇诲彇锛氬鏉捐В鏋愬竷灏旈噺锛堟敮鎸?true/false/1/0/yes/no/on/off锛屽瓧绗︿覆鎴栨暟鍊煎潎鍙級
+static bool yamlToBool(const YAML::Node &node, bool def = false) {
+    try {
+        if (!node || node.IsNull()) return def;
+        if (node.IsScalar()) {
+            try {
+                // try string parse
+                std::string t = node.as<std::string>();
+                std::transform(t.begin(), t.end(), t.begin(), [](unsigned char c) { return (char) std::tolower(c); });
+                if (t == "true" || t == "1" || t == "yes" || t == "on") return true;
+                if (t == "false" || t == "0" || t == "no" || t == "off") return false;
+            } catch (...) {
+                // 蹇界暐锛岃繘鍏ユ暟鍊?甯冨皵鍥為€€
+            }
+            try { int vi = node.as<int>(); return vi != 0; } catch (...) {}
+            try { return node.as<bool>(); } catch (...) { return def; }
+        } else {
+            try { return node.as<bool>(); } catch (...) { return def; }
+        }
+    } catch (...) { return def; }
+    return def;
+}
+
 int main(int argc, char *argv[]) {
 
     if (argc != 2) {
@@ -90,7 +113,7 @@ int main(int argc, char *argv[]) {
     int starttime = config["starttime"].as<int>();
     int endtime   = config["endtime"].as<int>();
 
-    // keyframe interval (sec). Default 1.0; allow 20–100 Hz via config
+    // keyframe interval (sec). Default 1.0; allow 20鈥?00 Hz via config
     double integration_length = INTEGRATION_LENGTH;
     if (config["kf_interval_sec"]) {
         try { integration_length = config["kf_interval_sec"].as<double>(); } catch (...) {}
@@ -99,9 +122,10 @@ int main(int argc, char *argv[]) {
     // number of iterations
     int num_iterations = config["num_iterations"].as<int>();
 
-
-    // Do GNSS outlier culling
-    bool is_outlier_culling = config["is_outlier_culling"].as<bool>();
+    // Do GNSS outlier culling (fallback false)
+    bool is_outlier_culling = yamlToBool(config["is_outlier_culling"], false);
+    // save multi-IMU results (main/left/right) in parallel
+    bool save_multi_imu     = yamlToBool(config["save_multi_imu"], false);
 
     // Debug controls (optional)
     bool dbg_enable = false;
@@ -109,32 +133,9 @@ int main(int argc, char *argv[]) {
     bool dbg_dual_chain = false; // run wheel and main preintegration in parallel for comparison
     if (config["debug"]) {
         auto dbg = config["debug"];
-        if (dbg["enable"]) {
-            try {
-                dbg_enable = dbg["enable"].as<bool>();
-            } catch (const YAML::BadConversion &) {
-                try {
-                    std::string s = dbg["enable"].as<std::string>();
-                    std::string t = s;
-                    std::transform(t.begin(), t.end(), t.begin(), [](unsigned char c) { return (char) std::tolower(c); });
-                    // accept common variants
-                    if (t == "true" || t == "1" || t == "yes" || t == "on") {
-                        dbg_enable = true;
-                    } else if (t == "false" || t == "0" || t == "no" || t == "off") {
-                        dbg_enable = false;
-                    } else {
-                        std::cout << "[warn] debug.enable='" << s
-                                  << "' not recognized, fallback to default (false)" << std::endl;
-                        dbg_enable = false;
-                    }
-                } catch (...) {
-                    std::cout << "[warn] debug.enable has invalid type, fallback to default (false)" << std::endl;
-                    dbg_enable = false;
-                }
-            }
-        }
+        dbg_enable = yamlToBool(dbg["enable"], false);
         if (dbg["level"])  dbg_level  = dbg["level"].as<int>();
-        if (dbg["dual_chain"]) dbg_dual_chain = dbg["dual_chain"].as<bool>();
+        dbg_dual_chain = yamlToBool(dbg["dual_chain"], false);
     }
     Debug::set(dbg_enable, dbg_level);
 
@@ -162,9 +163,9 @@ int main(int argc, char *argv[]) {
     bool use_main = false, use_wheel_left = false, use_wheel_right = false;
     if (config["run_mode"]) {
         auto rm = config["run_mode"];
-        if (rm["imu_main_enable"])    use_main       = rm["imu_main_enable"].as<bool>();
-        if (rm["wheel_left_enable"])  use_wheel_left = rm["wheel_left_enable"].as<bool>();
-        if (rm["wheel_right_enable"]) use_wheel_right= rm["wheel_right_enable"].as<bool>();
+        use_main        = yamlToBool(rm["imu_main_enable"], use_main);
+        use_wheel_left  = yamlToBool(rm["wheel_left_enable"], use_wheel_left);
+        use_wheel_right = yamlToBool(rm["wheel_right_enable"], use_wheel_right);
     }
 
     YAML::Node imu_node;
@@ -184,7 +185,7 @@ int main(int argc, char *argv[]) {
         if (imu_node["file"])      imupath     = imu_node["file"].as<std::string>();
         if (imu_node["columns"])   imudatalen  = imu_node["columns"].as<int>();
         if (imu_node["rate_hz"])   imudatarate = imu_node["rate_hz"].as<int>();
-        // 兼容旧版本。
+        // 鍏煎鏃х増鏈€?
         if (config["imufile"])     imupath     = config["imufile"].as<std::string>();
         if (config["imudatalen"])  imudatalen  = config["imudatalen"].as<int>();
         if (config["imudatarate"]) imudatarate = config["imudatarate"].as<int>();
@@ -209,7 +210,7 @@ int main(int argc, char *argv[]) {
     if (imudatarate == 0 && config["imudatarate"]) imudatarate = config["imudatarate"].as<int>();
 
     // consider the Earth's rotation
-    bool isearth = config["isearth"].as<bool>();
+    bool isearth = yamlToBool(config["isearth"], true);
 
     GnssFileLoader gnssfile(gnsspath);
     bool imu_is_wheel = (use_wheel_left || use_wheel_right);
@@ -237,6 +238,9 @@ int main(int argc, char *argv[]) {
     DBG_LOG(1, "IO", "imu_is_wheel=" << imu_is_wheel);
     FileSaver navfile(outputpath + "/OB_GINS_TXT.nav", 11, FileSaver::TEXT);
     FileSaver errfile(outputpath + "/OB_GINS_IMU_ERR.bin", 7, FileSaver::BINARY);
+    // 额外输出（多链同时保存）
+    FileSaver navfile_left, errfile_left, navfile_right, errfile_right;
+    bool left_out_ok = false, right_out_ok = false;
     if (!imufile.isOpen() || !navfile.isOpen() || !navfile.isOpen() || !errfile.isOpen()) {
         std::cout << "Failed to open data file" << std::endl;
         return -1;
@@ -276,7 +280,7 @@ int main(int argc, char *argv[]) {
         parameters->corr_time    = config["imumodel"]["corrtime"].as<double>() * 3600;
     }
 
-    bool isuseodo       = config["odometer"]["isuseodo"].as<bool>();
+    bool isuseodo       = yamlToBool(config["odometer"]["isuseodo"], false);
     vec                 = config["odometer"]["std"].as<std::vector<double>>();
     parameters->odo_std = Vector3d(vec.data());
     parameters->odo_srw = config["odometer"]["srw"].as<double>() * 1e-6;
@@ -447,7 +451,7 @@ int main(int argc, char *argv[]) {
 
                 // push time node
                 timelist.push_back(sow);
-                // 输出运行进度（多链）
+                // 杈撳嚭杩愯杩涘害锛堝閾撅級
                 {
                     static int lastpercent = -1;
                     int percent = int(((timelist.back() - starttime) * 100.0) / (endtime - starttime));
@@ -505,19 +509,19 @@ int main(int argc, char *argv[]) {
                         }
                     }
 
-                    // GNSS 同步加入主/轮链
+                    // GNSS 鍚屾鍔犲叆涓?杞摼
                     int index = 0; ceres::LossFunction *loss_function = new ceres::HuberLoss(1.0);
                     std::vector<std::pair<double, ceres::ResidualBlockId>> gnss_residualblock_id;
                     for (const auto &g : gnsslist) {
                         for (size_t i = index; i <= preint_main.size(); ++i) {
                             if (fabs(g.time - timelist[i]) < MINIMUM_INTERVAL) {
-                                // 主链
+                                // 涓婚摼
                                 {
                                     auto factor_m = new GnssFactor(g, antlever);
                                     auto id = problem.AddResidualBlock(factor_m, loss_function, statedatalist_main[i].pose);
                                     gnss_residualblock_id.push_back(std::make_pair(g.time, id));
                                 }
-                                // 左/右轮链（如启用）
+                                // 宸?鍙宠疆閾撅紙濡傚惎鐢級
                                 if (use_wheel_left) {
                                     auto factor_l = new GnssFactor(g, antlever);
                                     problem.AddResidualBlock(factor_l, loss_function, statedatalist_left[i].pose);
@@ -702,8 +706,16 @@ int main(int argc, char *argv[]) {
                     }
                 }
 
-                // write main result at boundary
+                // write results at boundary（主链 + 可选左右轮链）
                 writeNavResult(*timelist.rbegin(), station_origin, statelist_main[preint_main.size()], navfile, errfile);
+                if (save_multi_imu && use_wheel_left && navfile_left.isOpen() && errfile_left.isOpen()) {
+                    auto stL = statelist_left[preint_left.size()];
+                    writeNavResultWheel(*timelist.rbegin(), station_origin, stL, navfile_left, errfile_left);
+                }
+                if (save_multi_imu && use_wheel_right && navfile_right.isOpen() && errfile_right.isOpen()) {
+                    auto stR = statelist_right[preint_right.size()];
+                    writeNavResultWheel(*timelist.rbegin(), station_origin, stR, navfile_right, errfile_right);
+                }
 
                 // start next segment preintegrations
                 preint_main.emplace_back(Adapter::UnifiedPreintegrator::Create(
@@ -715,13 +727,27 @@ int main(int argc, char *argv[]) {
                     preint_right.emplace_back(Adapter::UnifiedPreintegrator::Create(
                         parameters, imu_pre_right, statelist_main[preint_main.size()], preintegration_options, true));
             } else {
-                // streaming output between keyframes using main chain
+                // streaming output between keyframes（主链 + 可选左右轮链）
                 auto integration = *preint_main.rbegin();
-                writeNavResult(integration->endTime(), station_origin, integration->currentStateMain(), navfile, errfile);
+                double t_out = integration->endTime();
+                writeNavResult(t_out, station_origin, integration->currentStateMain(), navfile, errfile);
+                if (save_multi_imu && use_wheel_left && navfile_left.isOpen() && errfile_left.isOpen()) {
+                    auto stL = preint_left.back()->currentStateWheel();
+                    writeNavResultWheel(t_out, station_origin, stL, navfile_left, errfile_left);
+                }
+                if (save_multi_imu && use_wheel_right && navfile_right.isOpen() && errfile_right.isOpen()) {
+                    auto stR = preint_right.back()->currentStateWheel();
+                    writeNavResultWheel(t_out, station_origin, stR, navfile_right, errfile_right);
+                }
             }
         }
 
-        navfile.close(); errfile.close(); if (imufile_main) imufile_main->close(); if (imufile_left) imufile_left->close(); if (imufile_right) imufile_right->close();
+        navfile.close(); errfile.close();
+        if (navfile_left.isOpen()) navfile_left.close();
+        if (errfile_left.isOpen()) errfile_left.close();
+        if (navfile_right.isOpen()) navfile_right.close();
+        if (errfile_right.isOpen()) errfile_right.close();
+        if (imufile_main) imufile_main->close(); if (imufile_left) imufile_left->close(); if (imufile_right) imufile_right->close();
         gnssfile.close();
 
         auto te = std::chrono::steady_clock::now();
@@ -1242,6 +1268,11 @@ int isNeedInterpolation(const IMU &imu0, const IMU &imu1, double mid) {
 
     return 0;
 }
+
+
+
+
+
 
 
 
