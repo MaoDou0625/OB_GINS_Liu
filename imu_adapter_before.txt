@@ -1,0 +1,87 @@
+﻿/*
+ * IMU adapter: 闆嗕腑涓籌MU涓庤疆寮廔MU鐨勫垎娴佷笌鎺ュ彛灏佽銆? * 鐩爣锛氫富娴佺▼浠呭叧蹇?IMU::is_wheel锛屽垎鏀垽鏂泦涓湪姝ゅ眰銆? *
+ * 褰撳墠瀹炵幇锛氫负灏介噺灏戞敼鍔ㄤ富娴佺▼锛岄€傞厤灞傚涓ょ被鎺ュ彛鍋氱粺涓€灏佽锛? * 榛樿浠嶈蛋涓籌MU棰勭Н鍒嗗疄鐜帮紱鍚庣画鍙湪姝ゅ鍒囨崲鍒拌疆寮忛绉垎鑰屼笉鏀逛富娴佺▼銆? */
+
+#pragma once
+
+#include <memory>
+#include <deque>
+
+#include "src/common/types.h"
+
+// 涓籌MU棰勭Н鍒嗕笌鍥犲瓙
+#include "src/preintegration/preintegration.h"
+#include "src/preintegration/preintegration_factor.h"
+#include "src/preintegration/imu_error_factor.h"
+
+// 杞甀MU鎺ュ彛锛堜负鏈潵鎺ュ叆鍋氶鐣欙紝涓嶅己渚濊禆浣跨敤锛?#include "src/wheel/integration_state_wheel.h"
+#include "src/wheel/preintegration_wheel.h"
+#include "src/wheel/preintegration_wheel_factor.h"
+#include "src/wheel/imu_error_factor_wheel.h"
+
+namespace Adapter {
+
+// 缁熶竴鐨勨€滈绉垎鍙ユ焺鈥?鈥?灏佽涓ゅ瀹炵幇锛涘綋鍓嶉粯璁や娇鐢ㄤ富IMU閫氶亾銆?class UnifiedPreintegrator {
+public:
+    using Options = Preintegration::PreintegrationOptions;
+
+    static std::shared_ptr<UnifiedPreintegrator>
+    Create(const std::shared_ptr<IntegrationParameters> &params, const IMU &first_imu,
+           const IntegrationState &init_state, Options opt, bool is_wheel);
+
+    void addNewImu(const IMU &imu);
+
+    double endTime() const;
+
+    // 缁熶竴璁块棶锛氬綋鍓嶇姸鎬?    // - currentStateMain(): 鑻ヤ负杞紡IMU锛屽垯鍋氱瓑浠峰瓧娈垫嫹璐濊浆鎹负涓籌MU缁撴瀯杩斿洖
+    // - currentStateWheel(): 浠呭湪 isWheel()==true 鏃舵湁鏁?    IntegrationState      currentStateMain() const;
+    WheelIntegrationState currentStateWheel() const;
+
+    // 鍘熺敓鎸囬拡锛堜緵鍥犲瓙鏋勫缓锛夈€?    std::shared_ptr<PreintegrationBase> rawMain() const { return preint_main_; }
+    std::shared_ptr<WheelPreintegrationBase> rawWheel() const { return preint_wheel_; }
+
+    bool isWheel() const { return is_wheel_; }
+
+private:
+    explicit UnifiedPreintegrator(bool is_wheel) : is_wheel_(is_wheel) {}
+
+    // 鏈潵濡傞渶鍒囨崲鍒拌疆IMU锛岄€傞厤灞傚彲鍚屾椂缁存姢涓ゅ锛屽疄鐜版寜闇€鍒嗘祦銆?    bool is_wheel_{false};
+    std::shared_ptr<PreintegrationBase> preint_main_;
+    std::shared_ptr<WheelPreintegrationBase> preint_wheel_;
+};
+
+// 缁熶竴鍏ュ彛锛氶绉垎閰嶇疆涓庣姸鎬佹墦鍖?瑙ｅ寘
+inline UnifiedPreintegrator::Options GetOptions(bool isuseodo, bool isearth) {
+    return Preintegration::getOptions(isuseodo, isearth);
+}
+
+inline int NumPoseParameter() { return Preintegration::numPoseParameter(); }
+
+inline int NumMixParameter(UnifiedPreintegrator::Options options) {
+    return Preintegration::numMixParameter(options);
+}
+
+inline IntegrationStateData StateToData(const IntegrationState &s, UnifiedPreintegrator::Options opt) {
+    return Preintegration::stateToData(s, opt);
+}
+
+inline IntegrationState StateFromData(const IntegrationStateData &d, UnifiedPreintegrator::Options opt) {
+    return Preintegration::stateFromData(d, opt);
+}
+
+// 缁熶竴鍒涘缓鍥犲瓙锛堟牴鎹?up->isWheel() 鍒嗘祦锛夈€?inline ceres::CostFunction *MakePreintFactor(const std::shared_ptr<UnifiedPreintegrator> &up) {
+    if (!up) return nullptr;
+    if (up->isWheel() && up->rawWheel()) return new WheelPreintegrationFactor(up->rawWheel());
+    if (up->rawMain()) return new PreintegrationFactor(up->rawMain());
+    return nullptr;
+}
+
+inline ceres::CostFunction *MakeImuErrorFactor(const std::shared_ptr<UnifiedPreintegrator> &up) {
+    if (!up) return nullptr;
+    if (up->isWheel() && up->rawWheel()) return new WheelImuErrorFactor(up->rawWheel());
+    if (up->rawMain()) return new ImuErrorFactor(up->rawMain());
+    return nullptr;
+}
+
+} // namespace Adapter
+
