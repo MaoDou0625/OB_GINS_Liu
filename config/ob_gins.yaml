@@ -14,6 +14,7 @@ save_multi_imu: true
 imu_main:
   file: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Body-IMU/C1_imu_increments.txt"
   #file: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Wheel-IMU-Left/C1_imu_increments.txt"
+  #file: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Wheel-IMU-Right/C1_imu_increments.txt"
   columns: 7
   rate_hz: 200
   init_yaw: -93.43   # from 0701Triple112.yaml IMU_up
@@ -28,7 +29,9 @@ imu_main:
     corrtime: 1.0
 
 imu_wheel_left:
-  file: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Wheel-IMU-Left/C1_imu_increments.txt"
+  #file: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Wheel-IMU-Left/C1_imu_increments.txt"
+  file: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Wheel-IMU-Right/C1_imu_increments.txt"
+  
   columns: 9
   rate_hz: 200
   init_yaw: -3.43    # from 0701Triple112.yaml IMU_left
@@ -45,7 +48,8 @@ imu_wheel_left:
     corrtime: 1.0
 
 imu_wheel_right:
-  file: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Wheel-IMU-Right/C1_imu_increments.txt"
+  #file: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Wheel-IMU-Right/C1_imu_increments.txt"
+  file: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Wheel-IMU-Left/C1_imu_increments.txt"
   columns: 9
   rate_hz: 200
   init_yaw: -3.43    # from 0701Triple112.yaml IMU_right
