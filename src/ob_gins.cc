@@ -294,20 +294,51 @@ int main(int argc, char *argv[]) {
         return -1;
     }
 
-    // installation parameters
+    // installation parameters（支持每条链分别覆盖）
+    auto read_vec3 = [&](const YAML::Node &node, const char *key, const Vector3d &fallback) -> Vector3d {
+        try {
+            if (node && node[key]) {
+                auto v = node[key].as<std::vector<double>>();
+                if (v.size() >= 3) return Vector3d(v.data());
+            }
+        } catch (...) {}
+        return fallback;
+    };
     vec = config["antlever"].as<std::vector<double>>();
-    Vector3d antlever(vec.data());
+    Vector3d antlever_global(vec.data());
     vec = config["odolever"].as<std::vector<double>>();
-    Vector3d odolever(vec.data());
+    Vector3d odolever_global(vec.data());
     vec = config["bodyangle"].as<std::vector<double>>();
-    Vector3d bodyangle(vec.data());
-    bodyangle *= D2R;
-    // Override bodyangle per-IMU if provided under the selected imu_node
-    if (imu_node && imu_node["bodyangle"]) {
-        vec = imu_node["bodyangle"].as<std::vector<double>>();
-        Vector3d imu_bodyangle(vec.data());
-        bodyangle = imu_bodyangle * D2R;
+    Vector3d bodyangle_global(vec.data());
+    Vector3d antlever_main  = antlever_global;
+    Vector3d antlever_left  = antlever_global;
+    Vector3d antlever_right = antlever_global;
+    Vector3d odolever_main  = odolever_global;
+    Vector3d odolever_left  = odolever_global;
+    Vector3d odolever_right = odolever_global;
+    Vector3d bodyangle_main = bodyangle_global;
+    Vector3d bodyangle_left = bodyangle_global;
+    Vector3d bodyangle_right= bodyangle_global;
+    // 各链 node 覆盖（兼容 GNSSLA/WheelLA/MisalignAngle 这些字段名）
+    if (imu_node_main) {
+        if (!imu_node_main["antlever"]) antlever_main = read_vec3(imu_node_main, "GNSSLA", antlever_main); else antlever_main = read_vec3(imu_node_main, "antlever", antlever_main);
+        odolever_main  = read_vec3(imu_node_main,  "odolever", odolever_main);
+        if (!imu_node_main["bodyangle"]) bodyangle_main = read_vec3(imu_node_main, "MisalignAngle", bodyangle_main); else bodyangle_main = read_vec3(imu_node_main, "bodyangle", bodyangle_main);
     }
+    if (imu_node_left) {
+        if (!imu_node_left["antlever"]) antlever_left = read_vec3(imu_node_left, "GNSSLA", antlever_left); else antlever_left = read_vec3(imu_node_left, "antlever", antlever_left);
+        if (!imu_node_left["odolever"]) odolever_left = read_vec3(imu_node_left, "WheelLA", odolever_left); else odolever_left = read_vec3(imu_node_left, "odolever", odolever_left);
+        if (!imu_node_left["bodyangle"]) bodyangle_left = read_vec3(imu_node_left, "MisalignAngle", bodyangle_left); else bodyangle_left = read_vec3(imu_node_left, "bodyangle", bodyangle_left);
+    }
+    if (imu_node_right) {
+        if (!imu_node_right["antlever"]) antlever_right = read_vec3(imu_node_right, "GNSSLA", antlever_right); else antlever_right = read_vec3(imu_node_right, "antlever", antlever_right);
+        if (!imu_node_right["odolever"]) odolever_right = read_vec3(imu_node_right, "WheelLA", odolever_right); else odolever_right = read_vec3(imu_node_right, "odolever", odolever_right);
+        if (!imu_node_right["bodyangle"]) bodyangle_right = read_vec3(imu_node_right, "MisalignAngle", bodyangle_right); else bodyangle_right = read_vec3(imu_node_right, "bodyangle", bodyangle_right);
+    }
+    // 角度单位转弧度
+    bodyangle_main  *= D2R;
+    bodyangle_left  *= D2R;
+    bodyangle_right *= D2R;
 
     // IMU noise parameters
     auto parameters          = std::make_shared<IntegrationParameters>();
@@ -332,8 +363,8 @@ int main(int argc, char *argv[]) {
     vec                 = config["odometer"]["std"].as<std::vector<double>>();
     parameters->odo_std = Vector3d(vec.data());
     parameters->odo_srw = config["odometer"]["srw"].as<double>() * 1e-6;
-    parameters->lodo    = odolever;
-    parameters->abv     = bodyangle;
+    parameters->lodo    = odolever_main;
+    parameters->abv     = bodyangle_main;
     DBG_LOG(2, "CFG",
             "imu noise: arw=" << parameters->gyr_arw << ", vrw=" << parameters->acc_vrw
             << ", gbstd=" << parameters->gyr_bias_std << ", abstd=" << parameters->acc_bias_std
@@ -389,13 +420,13 @@ int main(int argc, char *argv[]) {
 
         IntegrationState state_curr_main = {
             .time = round(gnss.time),
-            .p    = gnss.blh - Rotation::euler2quaternion(initatt_main) * antlever,
+            .p    = gnss.blh - Rotation::euler2quaternion(initatt_main) * antlever_main,
             .q    = Rotation::euler2quaternion(initatt_main),
             .v    = initvel,
             .bg   = initbg,
             .ba   = initba,
             .sodo = 0.0,
-            .abv  = {bodyangle[1], bodyangle[2]},
+            .abv  = {bodyangle_main[1], bodyangle_main[2]},
         };
         std::cout << "Initilization at " << gnss.time << " s " << std::endl;
         DBG_LOG(1, "INIT", "p0=" << state_curr_main.p.transpose() << ", v0=" << state_curr_main.v.transpose()
@@ -427,18 +458,24 @@ int main(int argc, char *argv[]) {
         double sow = round(gnss.time);
         timelist.push_back(sow);
 
+        // 为左右链克隆各自的安装参数（abv/lodo）
+        auto parameters_left  = std::make_shared<IntegrationParameters>(*parameters);
+        auto parameters_right = std::make_shared<IntegrationParameters>(*parameters);
+        parameters_left->abv  = bodyangle_left;  parameters_left->lodo  = odolever_left;
+        parameters_right->abv = bodyangle_right; parameters_right->lodo = odolever_right;
+
         // Initial preintegrations per chain（左右链使用各自初始姿态）
         preint_main.emplace_back(Adapter::UnifiedPreintegrator::Create(
             parameters, imu_pre_main, state_curr_main, preintegration_options, false));
         if (use_wheel_left) {
             IntegrationState init_left = state_curr_main; init_left.q = Rotation::euler2quaternion(initatt_left);
             preint_left.emplace_back(Adapter::UnifiedPreintegrator::Create(
-                parameters, imu_pre_left, init_left, preintegration_options, true));
+                parameters_left, imu_pre_left, init_left, preintegration_options, true));
         }
         if (use_wheel_right) {
             IntegrationState init_right = state_curr_main; init_right.q = Rotation::euler2quaternion(initatt_right);
             preint_right.emplace_back(Adapter::UnifiedPreintegrator::Create(
-                parameters, imu_pre_right, init_right, preintegration_options, true));
+                parameters_right, imu_pre_right, init_right, preintegration_options, true));
         }
 
         // prime next gnss
@@ -643,17 +680,17 @@ int main(int argc, char *argv[]) {
                             if (fabs(g.time - timelist[i]) < MINIMUM_INTERVAL) {
                                 // 涓婚摼
                                 {
-                                    auto factor_m = new GnssFactor(g, antlever);
+                                    auto factor_m = new GnssFactor(g, antlever_main);
                                     auto id = problem.AddResidualBlock(factor_m, loss_function, statedatalist_main[i].pose);
                                     gnss_residualblock_id.push_back(std::make_pair(g.time, id));
                                 }
                                 // 宸?鍙宠疆閾撅紙濡傚惎鐢級
                                 if (use_wheel_left) {
-                                    auto factor_l = new GnssFactor(g, antlever);
+                                    auto factor_l = new GnssFactor(g, antlever_left);
                                     problem.AddResidualBlock(factor_l, loss_function, statedatalist_left[i].pose);
                                 }
                                 if (use_wheel_right) {
-                                    auto factor_r = new GnssFactor(g, antlever);
+                                    auto factor_r = new GnssFactor(g, antlever_right);
                                     problem.AddResidualBlock(factor_r, loss_function, statedatalist_right[i].pose);
                                 }
                                 index++;
@@ -733,10 +770,10 @@ int main(int argc, char *argv[]) {
                         index = 0; for (auto &g2 : gnsslist) {
                             for (size_t i = index; i <= preint_main.size(); ++i) {
                                 if (fabs(g2.time - timelist[i]) < MINIMUM_INTERVAL) {
-                                    auto fM = new GnssFactor(g2, antlever);
+                                    auto fM = new GnssFactor(g2, antlever_main);
                                     problem.AddResidualBlock(fM, nullptr, statedatalist_main[i].pose);
-                                    if (use_wheel_left) { auto fL = new GnssFactor(g2, antlever); problem.AddResidualBlock(fL, nullptr, statedatalist_left[i].pose); }
-                                    if (use_wheel_right) { auto fR = new GnssFactor(g2, antlever); problem.AddResidualBlock(fR, nullptr, statedatalist_right[i].pose); }
+                                    if (use_wheel_left)  { auto fL = new GnssFactor(g2, antlever_left);  problem.AddResidualBlock(fL, nullptr, statedatalist_left[i].pose); }
+                                    if (use_wheel_right) { auto fR = new GnssFactor(g2, antlever_right); problem.AddResidualBlock(fR, nullptr, statedatalist_right[i].pose); }
                                     index++; break;
                                 }
                             }
@@ -798,9 +835,21 @@ int main(int argc, char *argv[]) {
                             marginalization_info->addResidualBlockInfo(residual);
                         }
                         if (fabs(timelist[0] - gnsslist[0].time) < MINIMUM_INTERVAL) {
-                            auto factor   = std::make_shared<GnssFactor>(gnsslist[0], antlever);
-                            auto residual = std::make_shared<ResidualBlockInfo>(factor, nullptr, std::vector<double *>{statedatalist_main[0].pose}, std::vector<int>{});
-                            marginalization_info->addResidualBlockInfo(residual);
+                            {
+                                auto factor   = std::make_shared<GnssFactor>(gnsslist[0], antlever_main);
+                                auto residual = std::make_shared<ResidualBlockInfo>(factor, nullptr, std::vector<double *>{statedatalist_main[0].pose}, std::vector<int>{});
+                                marginalization_info->addResidualBlockInfo(residual);
+                            }
+                            if (use_wheel_left) {
+                                auto factor   = std::make_shared<GnssFactor>(gnsslist[0], antlever_left);
+                                auto residual = std::make_shared<ResidualBlockInfo>(factor, nullptr, std::vector<double *>{statedatalist_left[0].pose}, std::vector<int>{});
+                                marginalization_info->addResidualBlockInfo(residual);
+                            }
+                            if (use_wheel_right) {
+                                auto factor   = std::make_shared<GnssFactor>(gnsslist[0], antlever_right);
+                                auto residual = std::make_shared<ResidualBlockInfo>(factor, nullptr, std::vector<double *>{statedatalist_right[0].pose}, std::vector<int>{});
+                                marginalization_info->addResidualBlockInfo(residual);
+                            }
                         }
 
                         marginalization_info->marginalization();
@@ -953,13 +1002,13 @@ int main(int argc, char *argv[]) {
 
     IntegrationState state_curr = {
         .time = round(gnss.time),
-        .p    = gnss.blh - Rotation::euler2quaternion(initatt) * antlever,
+        .p    = gnss.blh - Rotation::euler2quaternion(initatt) * antlever_main,
         .q    = Rotation::euler2quaternion(initatt),
         .v    = initvel,
         .bg   = initbg,
         .ba   = initba,
         .sodo = 0.0,
-        .abv  = {bodyangle[1], bodyangle[2]},
+        .abv  = {bodyangle_main[1], bodyangle_main[2]},
     };
     std::cout << "Initilization at " << gnss.time << " s " << std::endl;
     DBG_LOG(1, "INIT", "p0=" << state_curr.p.transpose() << ", v0=" << state_curr.v.transpose()
@@ -1098,7 +1147,7 @@ int main(int argc, char *argv[]) {
                 ceres::LossFunction *loss_function = new ceres::HuberLoss(1.0);
                 std::vector<std::pair<double, ceres::ResidualBlockId>> gnss_residualblock_id;
                 for (const auto &gnss : gnsslist) {
-                    auto factor = new GnssFactor(gnss, antlever);
+                    auto factor = new GnssFactor(gnss, antlever_main);
                     for (size_t i = index; i <= preintegrationlist.size(); ++i) {
                         if (fabs(gnss.time - timelist[i]) < MINIMUM_INTERVAL) {
                             auto id = problem.AddResidualBlock(factor, loss_function, statedatalist[i].pose);
@@ -1175,7 +1224,7 @@ int main(int argc, char *argv[]) {
                     // Add GNSS factors without loss function
                     index = 0;
                     for (auto &gnss : gnsslist) {
-                        auto factor = new GnssFactor(gnss, antlever);
+                        auto factor = new GnssFactor(gnss, antlever_main);
                         for (size_t i = index; i <= preintegrationlist.size(); ++i) {
                             if (fabs(gnss.time - timelist[i]) < MINIMUM_INTERVAL) {
                                 problem.AddResidualBlock(factor, nullptr, statedatalist[i].pose);
@@ -1233,7 +1282,7 @@ int main(int argc, char *argv[]) {
                     // GNSS factors
                     {
                         if (fabs(timelist[0] - gnsslist[0].time) < MINIMUM_INTERVAL) {
-                            auto factor   = std::make_shared<GnssFactor>(gnsslist[0], antlever);
+                            auto factor   = std::make_shared<GnssFactor>(gnsslist[0], antlever_main);
                             auto residual = std::make_shared<ResidualBlockInfo>(
                                 factor, nullptr, std::vector<double *>{statedatalist[0].pose}, std::vector<int>{});
                             marginalization_info->addResidualBlockInfo(residual);

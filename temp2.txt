@@ -1,0 +1,15 @@
+﻿                                // 涓婚摼
+                                {
+                                    auto factor_m = new GnssFactor(g, antlever);
+                                    auto id = problem.AddResidualBlock(factor_m, loss_function, statedatalist_main[i].pose);
+                                    gnss_residualblock_id.push_back(std::make_pair(g.time, id));
+                                }
+                                // 宸?鍙宠疆閾撅紙濡傚惎鐢級
+                                if (use_wheel_left) {
+                                    auto factor_l = new GnssFactor(g, antlever);
+                                    problem.AddResidualBlock(factor_l, loss_function, statedatalist_left[i].pose);
+                                }
+                                if (use_wheel_right) {
+                                    auto factor_r = new GnssFactor(g, antlever);
+                                    problem.AddResidualBlock(factor_r, loss_function, statedatalist_right[i].pose);
+                                }
