@@ -16,6 +16,7 @@ imu_main:
   #file: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Wheel-IMU-Left/C1_imu_increments.txt"
   columns: 7
   rate_hz: 200
+  init_yaw: -93.43   # from 0701Triple112.yaml IMU_up
   imunoise:
     arw: 1.2
     vrw: 6
@@ -29,6 +30,7 @@ imu_wheel_left:
   file: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Wheel-IMU-Left/C1_imu_increments.txt"
   columns: 9
   rate_hz: 200
+  init_yaw: -3.43    # from 0701Triple112.yaml IMU_left
   imunoise:
     arw: 1.2
     vrw: 6
@@ -42,6 +44,7 @@ imu_wheel_right:
   file: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Wheel-IMU-Right/C1_imu_increments.txt"
   columns: 9
   rate_hz: 200
+  init_yaw: -3.43    # from 0701Triple112.yaml IMU_right
   imunoise:
     arw: 1.2
     vrw: 6
