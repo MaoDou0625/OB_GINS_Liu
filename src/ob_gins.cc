@@ -149,25 +149,8 @@ int main(int argc, char *argv[]) {
     vec = config["initatt"].as<std::vector<double>>();
     Vector3d initatt(vec.data());
     initatt *= D2R;
-    // per-chain attitude overrides
-    auto read_initatt_for = [&](const YAML::Node &node, const Vector3d &fallback) -> Vector3d {
-        Vector3d att = fallback;
-        try {
-            if (node) {
-                if (node["initatt"]) {
-                    auto v = node["initatt"].as<std::vector<double>>();
-                    if (v.size() >= 3) { Vector3d tmp(v.data()); att = tmp * D2R; }
-                } else if (node["init_yaw"]) {
-                    double yaw_deg = node["init_yaw"].as<double>();
-                    att = Vector3d(0, 0, yaw_deg * D2R);
-                }
-            }
-        } catch (...) { /* keep fallback */ }
-        return att;
-    };
-    Vector3d initatt_main  = read_initatt_for(imu_node_main,  initatt);
-    Vector3d initatt_left  = read_initatt_for(imu_node_left,  initatt);
-    Vector3d initatt_right = read_initatt_for(imu_node_right, initatt);
+    // per-chain attitude overrides: will be computed after reading per-chain nodes
+    Vector3d initatt_main = initatt, initatt_left = initatt, initatt_right = initatt;
 
     vec = config["initgb"].as<std::vector<double>>();
     Vector3d initbg(vec.data());
@@ -196,6 +179,26 @@ int main(int argc, char *argv[]) {
     if (config["imu_main"])       imu_node_main  = config["imu_main"];
     if (config["imu_wheel_left"]) imu_node_left  = config["imu_wheel_left"];
     if (config["imu_wheel_right"])imu_node_right = config["imu_wheel_right"];
+    {
+        auto read_initatt_for = [&](const YAML::Node &node, const Vector3d &fallback) -> Vector3d {
+            Vector3d att = fallback;
+            try {
+                if (node) {
+                    if (node["initatt"]) {
+                        auto v = node["initatt"].as<std::vector<double>>();
+                        if (v.size() >= 3) { Vector3d tmp(v.data()); att = tmp * D2R; }
+                    } else if (node["init_yaw"]) {
+                        double yaw_deg = node["init_yaw"].as<double>();
+                        att = Vector3d(0, 0, yaw_deg * D2R);
+                    }
+                }
+            } catch (...) { /* keep fallback */ }
+            return att;
+        };
+        initatt_main  = read_initatt_for(imu_node_main,  initatt);
+        initatt_left  = read_initatt_for(imu_node_left,  initatt);
+        initatt_right = read_initatt_for(imu_node_right, initatt);
+    }
     if (use_main && config["imu_main"]) {
         imu_node = config["imu_main"];
     } else if (use_wheel_left && config["imu_wheel_left"]) {
@@ -700,6 +703,21 @@ int main(int argc, char *argv[]) {
 
                     options.max_num_iterations = num_iterations / 4; solver.Solve(options, &problem, &summary);
 
+                    // 同步优化结果到可读状态（即便窗口未满也同步，以避免首个窗口内输出使用未优化预测导致看似“发散”）
+                    for (size_t k = 0; k <= preint_main.size(); ++k) {
+                        statelist_main[k] = Adapter::StateFromData(statedatalist_main[k], preintegration_options);
+                    }
+                    if (use_wheel_left) {
+                        for (size_t k = 0; k <= preint_left.size(); ++k) {
+                            statelist_left[k] = Adapter::StateFromDataWheel(statedatalist_left[k], preintegration_options);
+                        }
+                    }
+                    if (use_wheel_right) {
+                        for (size_t k = 0; k <= preint_right.size(); ++k) {
+                            statelist_right[k] = Adapter::StateFromDataWheel(statedatalist_right[k], preintegration_options);
+                        }
+                    }
+
                     // outlier culling on main GNSS
                     if (is_outlier_culling && !gnss_residualblock_id.empty()) {
                         double chi2_threshold = 7.815;
@@ -831,17 +849,18 @@ int main(int argc, char *argv[]) {
 
                 // write results at boundary（主链 + 可选左右轮链）。发布前打印将要发布的拷贝
                 {
-                    IntegrationState out = statelist_main[preint_main.size()];
+                    // 使用优化后的状态（从 statedatalist_* 转回）
+                    IntegrationState out = Adapter::StateFromData(statedatalist_main[preint_main.size()], preintegration_options);
                     LOG(INFO) << "[PUB-IN] main p=" << out.p.transpose() << " q=" << out.q.coeffs().transpose();
                     writeNavResult(*timelist.rbegin(), station_origin, out, navfile, errfile);
                 }
                 if (save_multi_imu && use_wheel_left && navfile_left.isOpen() && errfile_left.isOpen()) {
-                    auto outL = statelist_left[preint_left.size()];
+                    auto outL = Adapter::StateFromDataWheel(statedatalist_left[preint_left.size()], preintegration_options);
                     LOG(INFO) << "[PUB-IN] left p=" << outL.p.transpose() << " q=" << outL.q.coeffs().transpose();
                     writeNavResultWheel(*timelist.rbegin(), station_origin, outL, navfile_left, errfile_left);
                 }
                 if (save_multi_imu && use_wheel_right && navfile_right.isOpen() && errfile_right.isOpen()) {
-                    auto outR = statelist_right[preint_right.size()];
+                    auto outR = Adapter::StateFromDataWheel(statedatalist_right[preint_right.size()], preintegration_options);
                     LOG(INFO) << "[PUB-IN] right p=" << outR.p.transpose() << " q=" << outR.q.coeffs().transpose();
                     writeNavResultWheel(*timelist.rbegin(), station_origin, outR, navfile_right, errfile_right);
                 }
