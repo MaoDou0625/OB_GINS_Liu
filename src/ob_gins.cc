@@ -67,7 +67,6 @@ void writeNavResultWheel(double time, const Vector3d &origin, const WheelIntegra
 
 // YAML 安全读取：宽松解析布尔量（支持 true/false/1/0/yes/no/on/off，字符串或数值均可）
 
-// YAML 瀹夊叏璇诲彇锛氬鏉捐В鏋愬竷灏旈噺锛堟敮鎸?true/false/1/0/yes/no/on/off锛屽瓧绗︿覆鎴栨暟鍊煎潎鍙級
 static bool yamlToBool(const YAML::Node &node, bool def = false) {
     try {
         if (!node || node.IsNull()) return def;
@@ -144,12 +143,31 @@ int main(int argc, char *argv[]) {
     }
     Debug::set(dbg_enable, dbg_level);
 
-    // initialization
+    // initialization（支持按链分别定义初始姿态，默认继承全局 initatt）
     vec = config["initvel"].as<std::vector<double>>();
     Vector3d initvel(vec.data());
     vec = config["initatt"].as<std::vector<double>>();
     Vector3d initatt(vec.data());
     initatt *= D2R;
+    // per-chain attitude overrides
+    auto read_initatt_for = [&](const YAML::Node &node, const Vector3d &fallback) -> Vector3d {
+        Vector3d att = fallback;
+        try {
+            if (node) {
+                if (node["initatt"]) {
+                    auto v = node["initatt"].as<std::vector<double>>();
+                    if (v.size() >= 3) { Vector3d tmp(v.data()); att = tmp * D2R; }
+                } else if (node["init_yaw"]) {
+                    double yaw_deg = node["init_yaw"].as<double>();
+                    att = Vector3d(0, 0, yaw_deg * D2R);
+                }
+            }
+        } catch (...) { /* keep fallback */ }
+        return att;
+    };
+    Vector3d initatt_main  = read_initatt_for(imu_node_main,  initatt);
+    Vector3d initatt_left  = read_initatt_for(imu_node_left,  initatt);
+    Vector3d initatt_right = read_initatt_for(imu_node_right, initatt);
 
     vec = config["initgb"].as<std::vector<double>>();
     Vector3d initbg(vec.data());
@@ -368,8 +386,8 @@ int main(int argc, char *argv[]) {
 
         IntegrationState state_curr_main = {
             .time = round(gnss.time),
-            .p    = gnss.blh - Rotation::euler2quaternion(initatt) * antlever,
-            .q    = Rotation::euler2quaternion(initatt),
+            .p    = gnss.blh - Rotation::euler2quaternion(initatt_main) * antlever,
+            .q    = Rotation::euler2quaternion(initatt_main),
             .v    = initvel,
             .bg   = initbg,
             .ba   = initba,
@@ -387,6 +405,8 @@ int main(int argc, char *argv[]) {
             ws.time = state_curr_main.time; ws.p = state_curr_main.p; ws.q = state_curr_main.q; ws.v = state_curr_main.v;
             ws.bg = state_curr_main.bg; ws.ba = state_curr_main.ba; ws.s = state_curr_main.s; ws.sodo = state_curr_main.sodo;
             ws.abv = state_curr_main.abv; ws.sg = state_curr_main.sg; ws.sa = state_curr_main.sa;
+            // 左链初始姿态覆盖
+            ws.q = Rotation::euler2quaternion(initatt_left);
             statelist_left[0]      = ws;
             statedatalist_left[0]  = Adapter::StateToDataWheel(ws, preintegration_options);
         }
@@ -395,6 +415,8 @@ int main(int argc, char *argv[]) {
             ws.time = state_curr_main.time; ws.p = state_curr_main.p; ws.q = state_curr_main.q; ws.v = state_curr_main.v;
             ws.bg = state_curr_main.bg; ws.ba = state_curr_main.ba; ws.s = state_curr_main.s; ws.sodo = state_curr_main.sodo;
             ws.abv = state_curr_main.abv; ws.sg = state_curr_main.sg; ws.sa = state_curr_main.sa;
+            // 右链初始姿态覆盖
+            ws.q = Rotation::euler2quaternion(initatt_right);
             statelist_right[0]     = ws;
             statedatalist_right[0] = Adapter::StateToDataWheel(ws, preintegration_options);
         }
@@ -402,15 +424,19 @@ int main(int argc, char *argv[]) {
         double sow = round(gnss.time);
         timelist.push_back(sow);
 
-        // Initial preintegrations per chain
+        // Initial preintegrations per chain（左右链使用各自初始姿态）
         preint_main.emplace_back(Adapter::UnifiedPreintegrator::Create(
             parameters, imu_pre_main, state_curr_main, preintegration_options, false));
-        if (use_wheel_left)
+        if (use_wheel_left) {
+            IntegrationState init_left = state_curr_main; init_left.q = Rotation::euler2quaternion(initatt_left);
             preint_left.emplace_back(Adapter::UnifiedPreintegrator::Create(
-                parameters, imu_pre_left, state_curr_main, preintegration_options, true));
-        if (use_wheel_right)
+                parameters, imu_pre_left, init_left, preintegration_options, true));
+        }
+        if (use_wheel_right) {
+            IntegrationState init_right = state_curr_main; init_right.q = Rotation::euler2quaternion(initatt_right);
             preint_right.emplace_back(Adapter::UnifiedPreintegrator::Create(
-                parameters, imu_pre_right, state_curr_main, preintegration_options, true));
+                parameters, imu_pre_right, init_right, preintegration_options, true));
+        }
 
         // prime next gnss
         gnss                = gnssfile.next();
@@ -820,15 +846,23 @@ int main(int argc, char *argv[]) {
                     writeNavResultWheel(*timelist.rbegin(), station_origin, outR, navfile_right, errfile_right);
                 }
 
-                // start next segment preintegrations
+                // start next segment preintegrations（左右链从各自末态起步）
+                auto toIntegration = [](const WheelIntegrationState &ws) -> IntegrationState {
+                    IntegrationState s{}; s.time = ws.time; s.p = ws.p; s.q = ws.q; s.v = ws.v;
+                    s.bg = ws.bg; s.ba = ws.ba; s.s = ws.s; s.sodo = ws.sodo; s.abv = ws.abv; s.sg = ws.sg; s.sa = ws.sa; return s;
+                };
                 preint_main.emplace_back(Adapter::UnifiedPreintegrator::Create(
                     parameters, imu_pre_main, statelist_main[preint_main.size()], preintegration_options, false));
-                if (use_wheel_left)
+                if (use_wheel_left) {
+                    IntegrationState left_state = toIntegration(statelist_left[preint_left.size()]);
                     preint_left.emplace_back(Adapter::UnifiedPreintegrator::Create(
-                        parameters, imu_pre_left, statelist_main[preint_main.size()], preintegration_options, true));
-                if (use_wheel_right)
+                        parameters, imu_pre_left, left_state, preintegration_options, true));
+                }
+                if (use_wheel_right) {
+                    IntegrationState right_state = toIntegration(statelist_right[preint_right.size()]);
                     preint_right.emplace_back(Adapter::UnifiedPreintegrator::Create(
-                        parameters, imu_pre_right, statelist_main[preint_main.size()], preintegration_options, true));
+                        parameters, imu_pre_right, right_state, preintegration_options, true));
+                }
             } else {
                 // streaming output between keyframes（主链 + 可选左右轮链）
                 auto integration = *preint_main.rbegin();
