@@ -1,19 +1,19 @@
 # OB_GINS: Optimization-Based GNSS/INS Integrated Navigation System
 run_mode:
-  imu_main_enable: false
+  imu_main_enable: ture
   wheel_left_enable: true
-  wheel_right_enable: false
+  wheel_right_enable: true
   share_factors: false
 # 数据文件
 # Data files
 gnssfile: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Ground Truth/GINS_all.pos"
-outputpath: "D:/Code/dataset/wheel-ins2_dataset/converted/out/C1-Test"
+outputpath: "D:/Code/dataset/wheel-ins2_dataset/converted/out/C1-Multi-Test"
 
 
 # multi-IMU independent configs (main/left/right)
 imu_main:
-  #file: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Body-IMU/C1_imu_increments.txt"
-  file: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Wheel-IMU-Left/C1_imu_increments.txt"
+  file: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Body-IMU/C1_imu_increments.txt"
+  #file: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Wheel-IMU-Left/C1_imu_increments.txt"
   columns: 7
   rate_hz: 200
   imunoise:
@@ -59,6 +59,8 @@ imu_wheel_right:
 windows: 30
 starttime: 132025
 endtime: 132225
+## 可选：关键帧时间间隔（秒），默认 1.0；设置为 0.05 可约 20 Hz
+kf_interval_sec: 1
 
 # 迭代次数
 # number of iterations

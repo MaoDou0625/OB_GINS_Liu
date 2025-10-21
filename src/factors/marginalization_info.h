@@ -25,6 +25,7 @@
 
 #include <memory>
 #include <unordered_map>
+#include <cstdint>
 
 #include "residual_block_info.h"
 
@@ -57,12 +58,12 @@ public:
         const auto &block_sizes      = blockinfo->parameterBlockSizes();
 
         for (size_t k = 0; k < parameter_blocks.size(); k++) {
-            parameter_block_size_[reinterpret_cast<long>(parameter_blocks[k])] = block_sizes[k];
+            parameter_block_size_[reinterpret_cast<std::uintptr_t>(parameter_blocks[k])] = block_sizes[k];
         }
 
         // 被边缘化的参数, 先加入表中以进行后续的排序
         for (int index : blockinfo->marginalizationParametersIndex()) {
-            parameter_block_index_[reinterpret_cast<long>(parameter_blocks[index])] = 0;
+            parameter_block_index_[reinterpret_cast<std::uintptr_t>(parameter_blocks[index])] = 0;
         }
     }
 
@@ -96,7 +97,7 @@ public:
         return true;
     }
 
-    std::vector<double *> getParamterBlocks(std::unordered_map<long, double *> &address) {
+    std::vector<double *> getParamterBlocks(std::unordered_map<std::uintptr_t, double *> &address) {
         std::vector<double *> remained_block_addr;
 
         remained_block_data_.clear();
@@ -194,14 +195,14 @@ private:
 
         for (const auto &factor : factors_) {
             for (size_t i = 0; i < factor->parameterBlocks().size(); i++) {
-                int row0 = parameter_block_index_[reinterpret_cast<long>(factor->parameterBlocks()[i])];
-                int rows = parameter_block_size_[reinterpret_cast<long>(factor->parameterBlocks()[i])];
+                int row0 = parameter_block_index_[reinterpret_cast<std::uintptr_t>(factor->parameterBlocks()[i])];
+                int rows = parameter_block_size_[reinterpret_cast<std::uintptr_t>(factor->parameterBlocks()[i])];
                 rows     = (rows == POSE_GLOBAL_SIZE) ? POSE_LOCAL_SIZE : rows;
 
                 Eigen::MatrixXd jacobian_i = factor->jacobians()[i].leftCols(rows);
                 for (size_t j = i; j < factor->parameterBlocks().size(); ++j) {
-                    int col0 = parameter_block_index_[reinterpret_cast<long>(factor->parameterBlocks()[j])];
-                    int cols = parameter_block_size_[reinterpret_cast<long>(factor->parameterBlocks()[j])];
+                    int col0 = parameter_block_index_[reinterpret_cast<std::uintptr_t>(factor->parameterBlocks()[j])];
+                    int cols = parameter_block_size_[reinterpret_cast<std::uintptr_t>(factor->parameterBlocks()[j])];
                     cols     = (cols == POSE_GLOBAL_SIZE) ? POSE_LOCAL_SIZE : cols;
 
                     Eigen::MatrixXd jacobian_j = factor->jacobians()[j].leftCols(cols);
@@ -252,7 +253,7 @@ private:
 
             std::vector<int> block_sizes = factor->parameterBlockSizes();
             for (size_t k = 0; k < block_sizes.size(); k++) {
-                long addr = reinterpret_cast<long>(factor->parameterBlocks()[k]);
+                std::uintptr_t addr = reinterpret_cast<std::uintptr_t>(factor->parameterBlocks()[k]);
                 int size  = block_sizes[k];
 
                 // 拷贝参数块数据
@@ -278,11 +279,11 @@ private:
     // 以内存地址为key的无序表
 
     // 存放参数块的global size
-    std::unordered_map<long, int> parameter_block_size_;
+    std::unordered_map<std::uintptr_t, int> parameter_block_size_;
     // 存放参数块索引, 待边缘化参数索引在前, 保留参数索引在后, 用于构造边缘化 H * dx = b
-    std::unordered_map<long, int> parameter_block_index_;
+    std::unordered_map<std::uintptr_t, int> parameter_block_index_;
     // 存放参数快数据指针
-    std::unordered_map<long, double *> parameter_block_data_;
+    std::unordered_map<std::uintptr_t, double *> parameter_block_data_;
 
     // 保留的参数
     std::vector<int> remained_block_size_;  // global size

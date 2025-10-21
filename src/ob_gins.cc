@@ -1,4 +1,4 @@
-/*
+﻿/*
  * OB_GINS: An Optimization-Based GNSS/INS Integrated Navigation System
  *
  * Copyright (C) 2022 i2Nav Group, Wuhan University
@@ -46,6 +46,8 @@
 #include <filesystem>
 #include <algorithm>
 #include <cctype>
+#include <unordered_set>
+#include <cstdint>
 
 // Debug utilities
 #include "src/common/debug.h"
@@ -61,6 +63,29 @@ void writeNavResult(double time, const Vector3d &origin, const IntegrationState 
 // Wheel-only writer to allow saving dual navigation results later
 void writeNavResultWheel(double time, const Vector3d &origin, const WheelIntegrationState &state, FileSaver &navfile,
                          FileSaver &errfile);
+
+// YAML 瀹夊叏璇诲彇锛氬鏉捐В鏋愬竷灏旈噺锛堟敮鎸?true/false/1/0/yes/no/on/off锛屽瓧绗︿覆鎴栨暟鍊煎潎鍙級
+static bool yamlToBool(const YAML::Node &node, bool def = false) {
+    try {
+        if (!node || node.IsNull()) return def;
+        if (node.IsScalar()) {
+            try {
+                // try string parse
+                std::string t = node.as<std::string>();
+                std::transform(t.begin(), t.end(), t.begin(), [](unsigned char c) { return (char) std::tolower(c); });
+                if (t == "true" || t == "1" || t == "yes" || t == "on") return true;
+                if (t == "false" || t == "0" || t == "no" || t == "off") return false;
+            } catch (...) {
+                // 蹇界暐锛岃繘鍏ユ暟鍊?甯冨皵鍥為€€
+            }
+            try { int vi = node.as<int>(); return vi != 0; } catch (...) {}
+            try { return node.as<bool>(); } catch (...) { return def; }
+        } else {
+            try { return node.as<bool>(); } catch (...) { return def; }
+        }
+    } catch (...) { return def; }
+    return def;
+}
 
 int main(int argc, char *argv[]) {
 
@@ -88,12 +113,19 @@ int main(int argc, char *argv[]) {
     int starttime = config["starttime"].as<int>();
     int endtime   = config["endtime"].as<int>();
 
+    // keyframe interval (sec). Default 1.0; allow 20鈥?00 Hz via config
+    double integration_length = INTEGRATION_LENGTH;
+    if (config["kf_interval_sec"]) {
+        try { integration_length = config["kf_interval_sec"].as<double>(); } catch (...) {}
+    }
+
     // number of iterations
     int num_iterations = config["num_iterations"].as<int>();
 
-
-    // Do GNSS outlier culling
-    bool is_outlier_culling = config["is_outlier_culling"].as<bool>();
+    // Do GNSS outlier culling (fallback false)
+    bool is_outlier_culling = yamlToBool(config["is_outlier_culling"], false);
+    // save multi-IMU results (main/left/right) in parallel
+    bool save_multi_imu     = yamlToBool(config["save_multi_imu"], false);
 
     // Debug controls (optional)
     bool dbg_enable = false;
@@ -101,32 +133,9 @@ int main(int argc, char *argv[]) {
     bool dbg_dual_chain = false; // run wheel and main preintegration in parallel for comparison
     if (config["debug"]) {
         auto dbg = config["debug"];
-        if (dbg["enable"]) {
-            try {
-                dbg_enable = dbg["enable"].as<bool>();
-            } catch (const YAML::BadConversion &) {
-                try {
-                    std::string s = dbg["enable"].as<std::string>();
-                    std::string t = s;
-                    std::transform(t.begin(), t.end(), t.begin(), [](unsigned char c) { return (char) std::tolower(c); });
-                    // accept common variants
-                    if (t == "true" || t == "1" || t == "yes" || t == "on") {
-                        dbg_enable = true;
-                    } else if (t == "false" || t == "0" || t == "no" || t == "off") {
-                        dbg_enable = false;
-                    } else {
-                        std::cout << "[warn] debug.enable='" << s
-                                  << "' not recognized, fallback to default (false)" << std::endl;
-                        dbg_enable = false;
-                    }
-                } catch (...) {
-                    std::cout << "[warn] debug.enable has invalid type, fallback to default (false)" << std::endl;
-                    dbg_enable = false;
-                }
-            }
-        }
+        dbg_enable = yamlToBool(dbg["enable"], false);
         if (dbg["level"])  dbg_level  = dbg["level"].as<int>();
-        if (dbg["dual_chain"]) dbg_dual_chain = dbg["dual_chain"].as<bool>();
+        dbg_dual_chain = yamlToBool(dbg["dual_chain"], false);
     }
     Debug::set(dbg_enable, dbg_level);
 
@@ -154,12 +163,16 @@ int main(int argc, char *argv[]) {
     bool use_main = false, use_wheel_left = false, use_wheel_right = false;
     if (config["run_mode"]) {
         auto rm = config["run_mode"];
-        if (rm["imu_main_enable"])    use_main       = rm["imu_main_enable"].as<bool>();
-        if (rm["wheel_left_enable"])  use_wheel_left = rm["wheel_left_enable"].as<bool>();
-        if (rm["wheel_right_enable"]) use_wheel_right= rm["wheel_right_enable"].as<bool>();
+        use_main        = yamlToBool(rm["imu_main_enable"], use_main);
+        use_wheel_left  = yamlToBool(rm["wheel_left_enable"], use_wheel_left);
+        use_wheel_right = yamlToBool(rm["wheel_right_enable"], use_wheel_right);
     }
 
     YAML::Node imu_node;
+    YAML::Node imu_node_main, imu_node_left, imu_node_right;
+    if (config["imu_main"])       imu_node_main  = config["imu_main"];
+    if (config["imu_wheel_left"]) imu_node_left  = config["imu_wheel_left"];
+    if (config["imu_wheel_right"])imu_node_right = config["imu_wheel_right"];
     if (use_main && config["imu_main"]) {
         imu_node = config["imu_main"];
     } else if (use_wheel_left && config["imu_wheel_left"]) {
@@ -172,7 +185,7 @@ int main(int argc, char *argv[]) {
         if (imu_node["file"])      imupath     = imu_node["file"].as<std::string>();
         if (imu_node["columns"])   imudatalen  = imu_node["columns"].as<int>();
         if (imu_node["rate_hz"])   imudatarate = imu_node["rate_hz"].as<int>();
-        // 兼容旧版本。
+        // 鍏煎鏃х増鏈€?
         if (config["imufile"])     imupath     = config["imufile"].as<std::string>();
         if (config["imudatalen"])  imudatalen  = config["imudatalen"].as<int>();
         if (config["imudatarate"]) imudatarate = config["imudatarate"].as<int>();
@@ -197,14 +210,37 @@ int main(int argc, char *argv[]) {
     if (imudatarate == 0 && config["imudatarate"]) imudatarate = config["imudatarate"].as<int>();
 
     // consider the Earth's rotation
-    bool isearth = config["isearth"].as<bool>();
+    bool isearth = yamlToBool(config["isearth"], true);
 
     GnssFileLoader gnssfile(gnsspath);
     bool imu_is_wheel = (use_wheel_left || use_wheel_right);
     ImuFileLoader imufile(imupath, imudatalen, imudatarate, imu_is_wheel);
+    // Optional additional IMU streams for multi-chain running
+    std::unique_ptr<ImuFileLoader> imufile_left, imufile_right, imufile_main;
+    if (imu_node_left) {
+        std::string path = imu_node_left["file"] ? imu_node_left["file"].as<std::string>() : "";
+        int cols = imu_node_left["columns"] ? imu_node_left["columns"].as<int>() : imudatalen;
+        int rate = imu_node_left["rate_hz"] ? imu_node_left["rate_hz"].as<int>() : imudatarate;
+        if (!path.empty()) imufile_left = std::make_unique<ImuFileLoader>(path, cols, rate, true);
+    }
+    if (imu_node_right) {
+        std::string path = imu_node_right["file"] ? imu_node_right["file"].as<std::string>() : "";
+        int cols = imu_node_right["columns"] ? imu_node_right["columns"].as<int>() : imudatalen;
+        int rate = imu_node_right["rate_hz"] ? imu_node_right["rate_hz"].as<int>() : imudatarate;
+        if (!path.empty()) imufile_right = std::make_unique<ImuFileLoader>(path, cols, rate, true);
+    }
+    if (imu_node_main) {
+        std::string path = imu_node_main["file"] ? imu_node_main["file"].as<std::string>() : "";
+        int cols = imu_node_main["columns"] ? imu_node_main["columns"].as<int>() : imudatalen;
+        int rate = imu_node_main["rate_hz"] ? imu_node_main["rate_hz"].as<int>() : imudatarate;
+        if (!path.empty()) imufile_main = std::make_unique<ImuFileLoader>(path, cols, rate, false);
+    }
     DBG_LOG(1, "IO", "imu_is_wheel=" << imu_is_wheel);
     FileSaver navfile(outputpath + "/OB_GINS_TXT.nav", 11, FileSaver::TEXT);
     FileSaver errfile(outputpath + "/OB_GINS_IMU_ERR.bin", 7, FileSaver::BINARY);
+    // 额外输出（多链同时保存）
+    FileSaver navfile_left, errfile_left, navfile_right, errfile_right;
+    bool left_out_ok = false, right_out_ok = false;
     if (!imufile.isOpen() || !navfile.isOpen() || !navfile.isOpen() || !errfile.isOpen()) {
         std::cout << "Failed to open data file" << std::endl;
         return -1;
@@ -244,7 +280,7 @@ int main(int argc, char *argv[]) {
         parameters->corr_time    = config["imumodel"]["corrtime"].as<double>() * 3600;
     }
 
-    bool isuseodo       = config["odometer"]["isuseodo"].as<bool>();
+    bool isuseodo       = yamlToBool(config["odometer"]["isuseodo"], false);
     vec                 = config["odometer"]["std"].as<std::vector<double>>();
     parameters->odo_std = Vector3d(vec.data());
     parameters->odo_srw = config["odometer"]["srw"].as<double>() * 1e-6;
@@ -266,7 +302,460 @@ int main(int argc, char *argv[]) {
 
     auto gnssthreshold = config["gnssthreshold"].as<double>();
 
-    // data alignment
+    // Multi-chain mode if main+at least one wheel are enabled
+    bool multi_chain = (use_main && (use_wheel_left || use_wheel_right) && imufile_main);
+    if (multi_chain) {
+        // Align each IMU stream to starttime
+        IMU imu_cur_main{}, imu_pre_main{};
+        IMU imu_cur_left{}, imu_pre_left{};
+        IMU imu_cur_right{}, imu_pre_right{};
+        do { imu_pre_main = imu_cur_main; imu_cur_main = imufile_main->next(); } while (imu_cur_main.time < starttime);
+        if (use_wheel_left && imufile_left)
+            do { imu_pre_left = imu_cur_left; imu_cur_left = imufile_left->next(); } while (imu_cur_left.time < starttime);
+        if (use_wheel_right && imufile_right)
+            do { imu_pre_right = imu_cur_right; imu_cur_right = imufile_right->next(); } while (imu_cur_right.time < starttime);
+        DBG_LOG(2, "IMU", "aligned main: t_pre=" << imu_pre_main.time << ", t_cur=" << imu_cur_main.time);
+        if (use_wheel_left && imufile_left)
+            DBG_LOG(2, "IMU", "aligned left: t_pre=" << imu_pre_left.time << ", t_cur=" << imu_cur_left.time);
+        if (use_wheel_right && imufile_right)
+            DBG_LOG(2, "IMU", "aligned right: t_pre=" << imu_pre_right.time << ", t_cur=" << imu_cur_right.time);
+
+        GNSS gnss;
+        do { gnss = gnssfile.next(); } while (gnss.time < starttime);
+
+        Vector3d station_origin = gnss.blh;
+        parameters->gravity     = Earth::gravity(gnss.blh);
+        gnss.blh                = Earth::global2local(station_origin, gnss.blh);
+        parameters->station     = station_origin;
+
+        std::vector<IntegrationState>       statelist_main(windows + 1);
+        std::vector<IntegrationStateData>   statedatalist_main(windows + 1);
+        std::deque<std::shared_ptr<Adapter::UnifiedPreintegrator>> preint_main;
+        std::vector<WheelIntegrationState>     statelist_left(windows + 1), statelist_right(windows + 1);
+        std::vector<WheelIntegrationStateData> statedatalist_left(windows + 1), statedatalist_right(windows + 1);
+        std::deque<std::shared_ptr<Adapter::UnifiedPreintegrator>> preint_left, preint_right;
+        std::deque<GNSS> gnsslist;
+        std::deque<double> timelist;
+
+        Adapter::UnifiedPreintegrator::Options preintegration_options = Adapter::GetOptions(isuseodo, isearth);
+
+        IntegrationState state_curr_main = {
+            .time = round(gnss.time),
+            .p    = gnss.blh - Rotation::euler2quaternion(initatt) * antlever,
+            .q    = Rotation::euler2quaternion(initatt),
+            .v    = initvel,
+            .bg   = initbg,
+            .ba   = initba,
+            .sodo = 0.0,
+            .abv  = {bodyangle[1], bodyangle[2]},
+        };
+        std::cout << "Initilization at " << gnss.time << " s " << std::endl;
+        DBG_LOG(1, "INIT", "p0=" << state_curr_main.p.transpose() << ", v0=" << state_curr_main.v.transpose()
+                << ", att0(deg)=" << (Rotation::quaternion2euler(state_curr_main.q) * R2D).transpose());
+
+        statelist_main[0]     = state_curr_main;
+        statedatalist_main[0] = Adapter::StateToData(state_curr_main, preintegration_options);
+        if (use_wheel_left) {
+            WheelIntegrationState ws{};
+            ws.time = state_curr_main.time; ws.p = state_curr_main.p; ws.q = state_curr_main.q; ws.v = state_curr_main.v;
+            ws.bg = state_curr_main.bg; ws.ba = state_curr_main.ba; ws.s = state_curr_main.s; ws.sodo = state_curr_main.sodo;
+            ws.abv = state_curr_main.abv; ws.sg = state_curr_main.sg; ws.sa = state_curr_main.sa;
+            statelist_left[0]      = ws;
+            statedatalist_left[0]  = Adapter::StateToDataWheel(ws, preintegration_options);
+        }
+        if (use_wheel_right) {
+            WheelIntegrationState ws{};
+            ws.time = state_curr_main.time; ws.p = state_curr_main.p; ws.q = state_curr_main.q; ws.v = state_curr_main.v;
+            ws.bg = state_curr_main.bg; ws.ba = state_curr_main.ba; ws.s = state_curr_main.s; ws.sodo = state_curr_main.sodo;
+            ws.abv = state_curr_main.abv; ws.sg = state_curr_main.sg; ws.sa = state_curr_main.sa;
+            statelist_right[0]     = ws;
+            statedatalist_right[0] = Adapter::StateToDataWheel(ws, preintegration_options);
+        }
+        gnsslist.push_back(gnss);
+        double sow = round(gnss.time);
+        timelist.push_back(sow);
+
+        // Initial preintegrations per chain
+        preint_main.emplace_back(Adapter::UnifiedPreintegrator::Create(
+            parameters, imu_pre_main, state_curr_main, preintegration_options, false));
+        if (use_wheel_left)
+            preint_left.emplace_back(Adapter::UnifiedPreintegrator::Create(
+                parameters, imu_pre_left, state_curr_main, preintegration_options, true));
+        if (use_wheel_right)
+            preint_right.emplace_back(Adapter::UnifiedPreintegrator::Create(
+                parameters, imu_pre_right, state_curr_main, preintegration_options, true));
+
+        // prime next gnss
+        gnss                = gnssfile.next();
+        parameters->gravity = Earth::gravity(gnss.blh);
+        gnss.blh            = Earth::global2local(station_origin, gnss.blh);
+
+        std::shared_ptr<MarginalizationInfo> last_marginalization_info;
+        std::vector<double *> last_marginalization_parameter_blocks;
+
+        sow += integration_length;
+
+        while (true) {
+            if ((imu_cur_main.time > endtime) || imufile_main->isEof()) {
+                break;
+            }
+
+            // feed master (main) stream
+            preint_main.back()->addNewImu(imu_cur_main);
+            imu_pre_main = imu_cur_main;
+            imu_cur_main = imufile_main->next();
+
+            if (imu_cur_main.time > sow) {
+                // GNSS alignment
+                if (fabs(gnss.time - sow) < MINIMUM_INTERVAL) {
+                    gnsslist.push_back(gnss);
+                    gnss = gnssfile.next();
+                    while ((gnss.std[0] > gnssthreshold) || (gnss.std[1] > gnssthreshold) || (gnss.std[2] > gnssthreshold)) {
+                        gnss = gnssfile.next();
+                    }
+                    if (isuseoutage) {
+                        if (lround(gnss.time) == outagetime) {
+                            std::cout << "GNSS outage at " << outagetime << " s" << std::endl;
+                            for (int k = 0; k < outagelen; k++) { gnss = gnssfile.next(); }
+                            outagetime += outageperiod;
+                        }
+                    }
+                    parameters->gravity = Earth::gravity(gnss.blh);
+                    gnss.blh            = Earth::global2local(station_origin, gnss.blh);
+                    if (gnssfile.isEof()) { gnss.time = 0; }
+                }
+
+                // boundary interpolation for main
+                int isneed = isNeedInterpolation(imu_pre_main, imu_cur_main, sow);
+                if (isneed == 1) {
+                    preint_main.back()->addNewImu(imu_cur_main);
+                    imu_pre_main = imu_cur_main; imu_cur_main = imufile_main->next();
+                } else if (isneed == 2) {
+                    imuInterpolation(imu_cur_main, imu_pre_main, imu_cur_main, sow);
+                    preint_main.back()->addNewImu(imu_pre_main);
+                }
+
+                // catch up wheel-left/right to boundary
+                if (use_wheel_left && imufile_left) {
+                    while (imu_cur_left.time <= sow) { preint_left.back()->addNewImu(imu_cur_left); imu_pre_left = imu_cur_left; imu_cur_left = imufile_left->next(); }
+                    int needL = isNeedInterpolation(imu_pre_left, imu_cur_left, sow);
+                    if (needL == 1) { preint_left.back()->addNewImu(imu_cur_left); imu_pre_left = imu_cur_left; imu_cur_left = imufile_left->next(); }
+                    else if (needL == 2) { imuInterpolation(imu_cur_left, imu_pre_left, imu_cur_left, sow); preint_left.back()->addNewImu(imu_pre_left); }
+                }
+                if (use_wheel_right && imufile_right) {
+                    while (imu_cur_right.time <= sow) { preint_right.back()->addNewImu(imu_cur_right); imu_pre_right = imu_cur_right; imu_cur_right = imufile_right->next(); }
+                    int needR = isNeedInterpolation(imu_pre_right, imu_cur_right, sow);
+                    if (needR == 1) { preint_right.back()->addNewImu(imu_cur_right); imu_pre_right = imu_cur_right; imu_cur_right = imufile_right->next(); }
+                    else if (needR == 2) { imuInterpolation(imu_cur_right, imu_pre_right, imu_cur_right, sow); preint_right.back()->addNewImu(imu_pre_right); }
+                }
+
+                // push time node
+                timelist.push_back(sow);
+                // 杈撳嚭杩愯杩涘害锛堝閾撅級
+                {
+                    static int lastpercent = -1;
+                    int percent = int(((timelist.back() - starttime) * 100.0) / (endtime - starttime));
+                    if (percent < 0) percent = 0; if (percent > 100) percent = 100;
+                    if (percent != lastpercent) {
+                        lastpercent = percent;
+                        std::cout << "Percentage: " << std::setw(3) << percent << "%\r";
+                        flush(std::cout);
+                    }
+                }
+                sow += integration_length;
+
+                // fill end states
+                auto st_main = preint_main.back()->currentStateMain();
+                statelist_main[preint_main.size()]     = st_main;
+                statedatalist_main[preint_main.size()] = Adapter::StateToData(st_main, preintegration_options);
+                if (use_wheel_left) {
+                    auto st = preint_left.back()->currentStateWheel();
+                    statelist_left[preint_left.size()]     = st;
+                    statedatalist_left[preint_left.size()] = Adapter::StateToDataWheel(st, preintegration_options);
+                }
+                if (use_wheel_right) {
+                    auto st = preint_right.back()->currentStateWheel();
+                    statelist_right[preint_right.size()]     = st;
+                    statedatalist_right[preint_right.size()] = Adapter::StateToDataWheel(st, preintegration_options);
+                }
+
+                // build and solve ceres problem
+                {
+                    ceres::Problem::Options problem_options; problem_options.enable_fast_removal = true;
+                    ceres::Problem problem(problem_options);
+                    ceres::Solver solver; ceres::Solver::Summary summary; ceres::Solver::Options options;
+                    options.trust_region_strategy_type = ceres::LEVENBERG_MARQUARDT;
+                    options.linear_solver_type         = ceres::SPARSE_NORMAL_CHOLESKY;
+                    options.num_threads                = 4;
+
+                    // add parameter blocks for all chains
+                    for (size_t k = 0; k <= preint_main.size(); k++) {
+                        ceres::Manifold *manifold = new PoseManifold();
+                        problem.AddParameterBlock(statedatalist_main[k].pose, Adapter::NumPoseParameter(), manifold);
+                        problem.AddParameterBlock(statedatalist_main[k].mix, Adapter::NumMixParameter(preintegration_options));
+                    }
+                    if (use_wheel_left) {
+                        for (size_t k = 0; k <= preint_left.size(); k++) {
+                            ceres::Manifold *manifold = new PoseManifold();
+                            problem.AddParameterBlock(statedatalist_left[k].pose, Adapter::NumPoseParameterWheel(), manifold);
+                            problem.AddParameterBlock(statedatalist_left[k].mix, Adapter::NumMixParameterWheel(preintegration_options));
+                        }
+                    }
+                    if (use_wheel_right) {
+                        for (size_t k = 0; k <= preint_right.size(); k++) {
+                            ceres::Manifold *manifold = new PoseManifold();
+                            problem.AddParameterBlock(statedatalist_right[k].pose, Adapter::NumPoseParameterWheel(), manifold);
+                            problem.AddParameterBlock(statedatalist_right[k].mix, Adapter::NumMixParameterWheel(preintegration_options));
+                        }
+                    }
+
+                    // GNSS 鍚屾鍔犲叆涓?杞摼
+                    int index = 0; ceres::LossFunction *loss_function = new ceres::HuberLoss(1.0);
+                    std::vector<std::pair<double, ceres::ResidualBlockId>> gnss_residualblock_id;
+                    for (const auto &g : gnsslist) {
+                        for (size_t i = index; i <= preint_main.size(); ++i) {
+                            if (fabs(g.time - timelist[i]) < MINIMUM_INTERVAL) {
+                                // 涓婚摼
+                                {
+                                    auto factor_m = new GnssFactor(g, antlever);
+                                    auto id = problem.AddResidualBlock(factor_m, loss_function, statedatalist_main[i].pose);
+                                    gnss_residualblock_id.push_back(std::make_pair(g.time, id));
+                                }
+                                // 宸?鍙宠疆閾撅紙濡傚惎鐢級
+                                if (use_wheel_left) {
+                                    auto factor_l = new GnssFactor(g, antlever);
+                                    problem.AddResidualBlock(factor_l, loss_function, statedatalist_left[i].pose);
+                                }
+                                if (use_wheel_right) {
+                                    auto factor_r = new GnssFactor(g, antlever);
+                                    problem.AddResidualBlock(factor_r, loss_function, statedatalist_right[i].pose);
+                                }
+                                index++;
+                                break;
+                            }
+                        }
+                    }
+
+                    // preintegration factors
+                    for (size_t k = 0; k < preint_main.size(); k++) {
+                        auto factor = Adapter::MakePreintFactor(preint_main[k]);
+                        problem.AddResidualBlock(factor, nullptr, statedatalist_main[k].pose, statedatalist_main[k].mix,
+                                                 statedatalist_main[k + 1].pose, statedatalist_main[k + 1].mix);
+                    }
+                    if (use_wheel_left) {
+                        for (size_t k = 0; k < preint_left.size(); k++) {
+                            auto factor = Adapter::MakePreintFactor(preint_left[k]);
+                            problem.AddResidualBlock(factor, nullptr, statedatalist_left[k].pose, statedatalist_left[k].mix,
+                                                     statedatalist_left[k + 1].pose, statedatalist_left[k + 1].mix);
+                        }
+                    }
+                    if (use_wheel_right) {
+                        for (size_t k = 0; k < preint_right.size(); k++) {
+                            auto factor = Adapter::MakePreintFactor(preint_right[k]);
+                            problem.AddResidualBlock(factor, nullptr, statedatalist_right[k].pose, statedatalist_right[k].mix,
+                                                     statedatalist_right[k + 1].pose, statedatalist_right[k + 1].mix);
+                        }
+                    }
+                    {
+                        // bias constraint per chain at window tail
+                        auto factor = Adapter::MakeImuErrorFactor(preint_main.back());
+                        problem.AddResidualBlock(factor, nullptr, statedatalist_main[preint_main.size()].mix);
+                        if (use_wheel_left) {
+                            auto fL = Adapter::MakeImuErrorFactor(preint_left.back());
+                            problem.AddResidualBlock(fL, nullptr, statedatalist_left[preint_left.size()].mix);
+                        }
+                        if (use_wheel_right) {
+                            auto fR = Adapter::MakeImuErrorFactor(preint_right.back());
+                            problem.AddResidualBlock(fR, nullptr, statedatalist_right[preint_right.size()].mix);
+                        }
+                    }
+
+                    if (last_marginalization_info && last_marginalization_info->isValid()) {
+                        auto factor = new MarginalizationFactor(last_marginalization_info);
+                        problem.AddResidualBlock(factor, nullptr, last_marginalization_parameter_blocks);
+                    }
+
+                    options.max_num_iterations = num_iterations / 4; solver.Solve(options, &problem, &summary);
+
+                    // outlier culling on main GNSS
+                    if (is_outlier_culling && !gnss_residualblock_id.empty()) {
+                        double chi2_threshold = 7.815;
+                        std::unordered_set<double> gnss_outlier;
+                        size_t K = std::min(gnsslist.size(), gnss_residualblock_id.size());
+                        for (size_t k = 0; k < K; k++) {
+                            auto time = gnss_residualblock_id[k].first; auto id = gnss_residualblock_id[k].second;
+                            double cost; problem.EvaluateResidualBlock(id, false, &cost, nullptr, nullptr);
+                            double chi2 = cost * 2;
+                            if (chi2 > chi2_threshold) { gnss_outlier.insert(time); double scale = sqrt(chi2 / chi2_threshold); gnsslist[k].std *= scale; }
+                        }
+                        for (const auto &block : gnss_residualblock_id) { problem.RemoveResidualBlock(block.second); }
+                        index = 0; for (auto &g2 : gnsslist) {
+                            for (size_t i = index; i <= preint_main.size(); ++i) {
+                                if (fabs(g2.time - timelist[i]) < MINIMUM_INTERVAL) {
+                                    auto fM = new GnssFactor(g2, antlever);
+                                    problem.AddResidualBlock(fM, nullptr, statedatalist_main[i].pose);
+                                    if (use_wheel_left) { auto fL = new GnssFactor(g2, antlever); problem.AddResidualBlock(fL, nullptr, statedatalist_left[i].pose); }
+                                    if (use_wheel_right) { auto fR = new GnssFactor(g2, antlever); problem.AddResidualBlock(fR, nullptr, statedatalist_right[i].pose); }
+                                    index++; break;
+                                }
+                            }
+                        }
+                    }
+
+                    // marginalization when window full
+                    if (preint_main.size() == static_cast<size_t>(windows)) {
+                        std::shared_ptr<MarginalizationInfo> marginalization_info = std::make_shared<MarginalizationInfo>();
+                        if (last_marginalization_info && last_marginalization_info->isValid()) {
+                            std::vector<int> marginilized_index;
+                            for (size_t k = 0; k < last_marginalization_parameter_blocks.size(); k++) {
+                                if (last_marginalization_parameter_blocks[k] == statedatalist_main[0].pose ||
+                                    last_marginalization_parameter_blocks[k] == statedatalist_main[0].mix) {
+                                    marginilized_index.push_back(static_cast<int>(k));
+                                }
+                                if (use_wheel_left &&
+                                    (last_marginalization_parameter_blocks[k] == statedatalist_left[0].pose ||
+                                     last_marginalization_parameter_blocks[k] == statedatalist_left[0].mix)) {
+                                    marginilized_index.push_back(static_cast<int>(k));
+                                }
+                                if (use_wheel_right &&
+                                    (last_marginalization_parameter_blocks[k] == statedatalist_right[0].pose ||
+                                     last_marginalization_parameter_blocks[k] == statedatalist_right[0].mix)) {
+                                    marginilized_index.push_back(static_cast<int>(k));
+                                }
+                            }
+                            auto factor   = std::make_shared<MarginalizationFactor>(last_marginalization_info);
+                            auto residual = std::make_shared<ResidualBlockInfo>(factor, nullptr, last_marginalization_parameter_blocks, marginilized_index);
+                            marginalization_info->addResidualBlockInfo(residual);
+                        }
+
+                        // add first segment factors for all chains
+                        {
+                            auto factor   = std::shared_ptr<ceres::CostFunction>(Adapter::MakePreintFactor(preint_main[0]));
+                            auto residual = std::make_shared<ResidualBlockInfo>(
+                                factor, nullptr,
+                                std::vector<double *>{statedatalist_main[0].pose, statedatalist_main[0].mix,
+                                                      statedatalist_main[1].pose, statedatalist_main[1].mix},
+                                std::vector<int>{0, 1});
+                            marginalization_info->addResidualBlockInfo(residual);
+                        }
+                        if (use_wheel_left) {
+                            auto factor   = std::shared_ptr<ceres::CostFunction>(Adapter::MakePreintFactor(preint_left[0]));
+                            auto residual = std::make_shared<ResidualBlockInfo>(
+                                factor, nullptr,
+                                std::vector<double *>{statedatalist_left[0].pose, statedatalist_left[0].mix,
+                                                      statedatalist_left[1].pose, statedatalist_left[1].mix},
+                                std::vector<int>{0, 1});
+                            marginalization_info->addResidualBlockInfo(residual);
+                        }
+                        if (use_wheel_right) {
+                            auto factor   = std::shared_ptr<ceres::CostFunction>(Adapter::MakePreintFactor(preint_right[0]));
+                            auto residual = std::make_shared<ResidualBlockInfo>(
+                                factor, nullptr,
+                                std::vector<double *>{statedatalist_right[0].pose, statedatalist_right[0].mix,
+                                                      statedatalist_right[1].pose, statedatalist_right[1].mix},
+                                std::vector<int>{0, 1});
+                            marginalization_info->addResidualBlockInfo(residual);
+                        }
+                        if (fabs(timelist[0] - gnsslist[0].time) < MINIMUM_INTERVAL) {
+                            auto factor   = std::make_shared<GnssFactor>(gnsslist[0], antlever);
+                            auto residual = std::make_shared<ResidualBlockInfo>(factor, nullptr, std::vector<double *>{statedatalist_main[0].pose}, std::vector<int>{});
+                            marginalization_info->addResidualBlockInfo(residual);
+                        }
+
+                        marginalization_info->marginalization();
+
+                        std::unordered_map<std::uintptr_t, double *> address;
+                        for (size_t k = 1; k <= preint_main.size(); k++) {
+                            address[reinterpret_cast<std::uintptr_t>(statedatalist_main[k].pose)] = statedatalist_main[k - 1].pose;
+                            address[reinterpret_cast<std::uintptr_t>(statedatalist_main[k].mix)]  = statedatalist_main[k - 1].mix;
+                        }
+                        if (use_wheel_left) {
+                            for (size_t k = 1; k <= preint_left.size(); k++) {
+                                address[reinterpret_cast<std::uintptr_t>(statedatalist_left[k].pose)] = statedatalist_left[k - 1].pose;
+                                address[reinterpret_cast<std::uintptr_t>(statedatalist_left[k].mix)]  = statedatalist_left[k - 1].mix;
+                            }
+                        }
+                        if (use_wheel_right) {
+                            for (size_t k = 1; k <= preint_right.size(); k++) {
+                                address[reinterpret_cast<std::uintptr_t>(statedatalist_right[k].pose)] = statedatalist_right[k - 1].pose;
+                                address[reinterpret_cast<std::uintptr_t>(statedatalist_right[k].mix)]  = statedatalist_right[k - 1].mix;
+                            }
+                        }
+                        last_marginalization_parameter_blocks = marginalization_info->getParamterBlocks(address);
+                        last_marginalization_info             = std::move(marginalization_info);
+
+                        // pop oldest segment across chains
+                        if (lround(timelist[0]) == lround(gnsslist[0].time)) { gnsslist.pop_front(); }
+                        timelist.pop_front();
+                        preint_main.pop_front();
+                        if (use_wheel_left)  preint_left.pop_front();
+                        if (use_wheel_right) preint_right.pop_front();
+
+                        for (int k = 0; k < windows; k++) {
+                            statedatalist_main[k] = statedatalist_main[k + 1];
+                            statelist_main[k]     = Adapter::StateFromData(statedatalist_main[k], preintegration_options);
+                            if (use_wheel_left) {
+                                statedatalist_left[k] = statedatalist_left[k + 1];
+                                statelist_left[k]     = Adapter::StateFromDataWheel(statedatalist_left[k], preintegration_options);
+                            }
+                            if (use_wheel_right) {
+                                statedatalist_right[k] = statedatalist_right[k + 1];
+                                statelist_right[k]     = Adapter::StateFromDataWheel(statedatalist_right[k], preintegration_options);
+                            }
+                        }
+                    }
+                }
+
+                // write results at boundary（主链 + 可选左右轮链）
+                writeNavResult(*timelist.rbegin(), station_origin, statelist_main[preint_main.size()], navfile, errfile);
+                if (save_multi_imu && use_wheel_left && navfile_left.isOpen() && errfile_left.isOpen()) {
+                    auto stL = statelist_left[preint_left.size()];
+                    writeNavResultWheel(*timelist.rbegin(), station_origin, stL, navfile_left, errfile_left);
+                }
+                if (save_multi_imu && use_wheel_right && navfile_right.isOpen() && errfile_right.isOpen()) {
+                    auto stR = statelist_right[preint_right.size()];
+                    writeNavResultWheel(*timelist.rbegin(), station_origin, stR, navfile_right, errfile_right);
+                }
+
+                // start next segment preintegrations
+                preint_main.emplace_back(Adapter::UnifiedPreintegrator::Create(
+                    parameters, imu_pre_main, statelist_main[preint_main.size()], preintegration_options, false));
+                if (use_wheel_left)
+                    preint_left.emplace_back(Adapter::UnifiedPreintegrator::Create(
+                        parameters, imu_pre_left, statelist_main[preint_main.size()], preintegration_options, true));
+                if (use_wheel_right)
+                    preint_right.emplace_back(Adapter::UnifiedPreintegrator::Create(
+                        parameters, imu_pre_right, statelist_main[preint_main.size()], preintegration_options, true));
+            } else {
+                // streaming output between keyframes（主链 + 可选左右轮链）
+                auto integration = *preint_main.rbegin();
+                double t_out = integration->endTime();
+                writeNavResult(t_out, station_origin, integration->currentStateMain(), navfile, errfile);
+                if (save_multi_imu && use_wheel_left && navfile_left.isOpen() && errfile_left.isOpen()) {
+                    auto stL = preint_left.back()->currentStateWheel();
+                    writeNavResultWheel(t_out, station_origin, stL, navfile_left, errfile_left);
+                }
+                if (save_multi_imu && use_wheel_right && navfile_right.isOpen() && errfile_right.isOpen()) {
+                    auto stR = preint_right.back()->currentStateWheel();
+                    writeNavResultWheel(t_out, station_origin, stR, navfile_right, errfile_right);
+                }
+            }
+        }
+
+        navfile.close(); errfile.close();
+        if (navfile_left.isOpen()) navfile_left.close();
+        if (errfile_left.isOpen()) errfile_left.close();
+        if (navfile_right.isOpen()) navfile_right.close();
+        if (errfile_right.isOpen()) errfile_right.close();
+        if (imufile_main) imufile_main->close(); if (imufile_left) imufile_left->close(); if (imufile_right) imufile_right->close();
+        gnssfile.close();
+
+        auto te = std::chrono::steady_clock::now();
+        std::cout << std::endl << std::endl << "Cost " << std::chrono::duration<double>(te - ts).count() << " s in total" << std::endl;
+        return 0;
+    }
+
+    // data alignment (single-chain legacy path)
     IMU imu_cur, imu_pre;
     do {
         imu_pre = imu_cur;
@@ -338,7 +827,7 @@ int main(int argc, char *argv[]) {
     std::shared_ptr<MarginalizationInfo> last_marginalization_info;
     std::vector<double *> last_marginalization_parameter_blocks;
 
-    sow += INTEGRATION_LENGTH;
+    sow += integration_length;
 
     while (true) {
         if ((imu_cur.time > endtime) || imufile.isEof()) {
@@ -397,7 +886,7 @@ int main(int argc, char *argv[]) {
 
             // next time node
             timelist.push_back(sow);
-            sow += INTEGRATION_LENGTH;
+            sow += integration_length;
 
             state_curr                               = preintegrationlist.back()->currentStateMain();
             statelist[preintegrationlist.size()]     = state_curr;
@@ -487,7 +976,8 @@ int main(int argc, char *argv[]) {
 
                     // Find GNSS outliers in the window
                     std::unordered_set<double> gnss_outlier;
-                    for (size_t k = 0; k < gnsslist.size(); k++) {
+                    size_t K = std::min(gnsslist.size(), gnss_residualblock_id.size());
+                    for (size_t k = 0; k < K; k++) {
                         auto time = gnss_residualblock_id[k].first;
                         auto id   = gnss_residualblock_id[k].second;
 
@@ -589,10 +1079,10 @@ int main(int argc, char *argv[]) {
 
                     marginalization_info->marginalization();
 
-                    std::unordered_map<long, double *> address;
+                    std::unordered_map<std::uintptr_t, double *> address;
                     for (size_t k = 1; k <= preintegrationlist.size(); k++) {
-                        address[reinterpret_cast<long>(statedatalist[k].pose)] = statedatalist[k - 1].pose;
-                        address[reinterpret_cast<long>(statedatalist[k].mix)]  = statedatalist[k - 1].mix;
+                        address[reinterpret_cast<std::uintptr_t>(statedatalist[k].pose)] = statedatalist[k - 1].pose;
+                        address[reinterpret_cast<std::uintptr_t>(statedatalist[k].mix)]  = statedatalist[k - 1].mix;
                     }
                     last_marginalization_parameter_blocks = marginalization_info->getParamterBlocks(address);
                     last_marginalization_info             = std::move(marginalization_info);
@@ -778,6 +1268,11 @@ int isNeedInterpolation(const IMU &imu0, const IMU &imu1, double mid) {
 
     return 0;
 }
+
+
+
+
+
 
 
 
