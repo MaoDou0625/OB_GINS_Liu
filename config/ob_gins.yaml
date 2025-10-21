@@ -1,6 +1,6 @@
 # OB_GINS: Optimization-Based GNSS/INS Integrated Navigation System
 run_mode:
-  imu_main_enable: ture
+  imu_main_enable: true
   wheel_left_enable: true
   wheel_right_enable: true
   share_factors: false
@@ -8,7 +8,7 @@ run_mode:
 # Data files
 gnssfile: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Ground Truth/GINS_all.pos"
 outputpath: "D:/Code/dataset/wheel-ins2_dataset/converted/out/C1-Multi-Test"
-
+save_multi_imu: true
 
 # multi-IMU independent configs (main/left/right)
 imu_main:
@@ -119,6 +119,6 @@ gnssthreshold: 20.0
 
 # 调试开关（可选）
 debug:
-  enable: false         # 总开关，true 时打印调试信息
-  level: 3              # 调试级别：1=概要 2=详细 3=更详细
-  dual_chain: false    # 在轮式IMU数据上并行运行主IMU链做对比
+  enable: true        # 总开关，true 时打印调试信息
+  level: 1              # 调试级别：1=概要 2=详细 3=更详细
+  #dual_chain: false    # 在轮式IMU数据上并行运行主IMU链做对比

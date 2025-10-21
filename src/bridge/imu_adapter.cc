@@ -112,4 +112,11 @@ WheelIntegrationState UnifiedPreintegrator::currentStateWheel() const {
     return {};
 }
 
+const std::vector<IMU> &UnifiedPreintegrator::inputView() const {
+    static const std::vector<IMU> kEmpty;
+    if (preint_main_)  return preint_main_->imuBuffer();
+    if (preint_wheel_) return preint_wheel_->imuBuffer();
+    return kEmpty;
+}
+
 } // namespace Adapter

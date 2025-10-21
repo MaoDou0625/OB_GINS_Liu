@@ -51,6 +51,7 @@
 
 // Debug utilities
 #include "src/common/debug.h"
+#include "src/common/logging.h"
 
 #define INTEGRATION_LENGTH 1.0
 #define MINIMUM_INTERVAL 0.001
@@ -95,6 +96,8 @@ int main(int argc, char *argv[]) {
     }
 
     std::cout << "\nOB_GINS: An Optimization-Based GNSS/INS Integrated Navigation System\n\n";
+    // 初始化 glog（终端彩色输出，默认不写文件）
+    Logging::initialization(argv, /*logtostderr=*/true, /*logtofile=*/false);
 
     auto ts = std::chrono::steady_clock::now();
 
@@ -241,6 +244,28 @@ int main(int argc, char *argv[]) {
     // 额外输出（多链同时保存）
     FileSaver navfile_left, errfile_left, navfile_right, errfile_right;
     bool left_out_ok = false, right_out_ok = false;
+    if (save_multi_imu) {
+        if (use_wheel_left) {
+            std::string navL = outputpath + "/OB_GINS_TXT_left.nav";
+            std::string errL = outputpath + "/OB_GINS_IMU_ERR_left.bin";
+            left_out_ok = navfile_left.open(navL, 11, FileSaver::TEXT) && errfile_left.open(errL, 7, FileSaver::BINARY);
+            if (!left_out_ok) {
+                LOG(WARNING) << "[IO] 打开左轮输出失败: nav='" << navL << "' err='" << errL << "'";
+            } else {
+                LOG(INFO) << "[IO] 左轮输出文件已打开: nav='" << navL << "' err='" << errL << "'";
+            }
+        }
+        if (use_wheel_right) {
+            std::string navR = outputpath + "/OB_GINS_TXT_right.nav";
+            std::string errR = outputpath + "/OB_GINS_IMU_ERR_right.bin";
+            right_out_ok = navfile_right.open(navR, 11, FileSaver::TEXT) && errfile_right.open(errR, 7, FileSaver::BINARY);
+            if (!right_out_ok) {
+                LOG(WARNING) << "[IO] 打开右轮输出失败: nav='" << navR << "' err='" << errR << "'";
+            } else {
+                LOG(INFO) << "[IO] 右轮输出文件已打开: nav='" << navR << "' err='" << errR << "'";
+            }
+        }
+    }
     if (!imufile.isOpen() || !navfile.isOpen() || !navfile.isOpen() || !errfile.isOpen()) {
         std::cout << "Failed to open data file" << std::endl;
         return -1;
@@ -464,6 +489,39 @@ int main(int argc, char *argv[]) {
                 }
                 sow += integration_length;
 
+                // 在进入优化/发布阶段前，打印 PI 入口统计（使用实际参与预积分的输入序列）
+                if (Debug::on(1)) {
+                    auto mean_acc_norm = [](const std::vector<IMU> &buf) -> double {
+                        double asum = 0.0; size_t cnt = 0;
+                        for (const auto &m : buf) { if (m.dt > 0) { asum += (m.dvel / m.dt).norm(); cnt++; } }
+                        return cnt ? (asum / static_cast<double>(cnt)) : 0.0;
+                    };
+                    if (!preint_main.empty()) {
+                        const auto &used = preint_main.back()->inputView();
+                        if (!used.empty()) {
+                            LOG(INFO) << "[PI-IN] main N=" << used.size()
+                                      << " t:[" << used.front().time << "," << used.back().time << "]"
+                                      << " ā=" << mean_acc_norm(used);
+                        }
+                    }
+                    if (use_wheel_left && !preint_left.empty()) {
+                        const auto &used = preint_left.back()->inputView();
+                        if (!used.empty()) {
+                            LOG(INFO) << "[PI-IN] left N=" << used.size()
+                                      << " t:[" << used.front().time << "," << used.back().time << "]"
+                                      << " ā=" << mean_acc_norm(used);
+                        }
+                    }
+                    if (use_wheel_right && !preint_right.empty()) {
+                        const auto &used = preint_right.back()->inputView();
+                        if (!used.empty()) {
+                            LOG(INFO) << "[PI-IN] right N=" << used.size()
+                                      << " t:[" << used.front().time << "," << used.back().time << "]"
+                                      << " ā=" << mean_acc_norm(used);
+                        }
+                    }
+                }
+
                 // fill end states
                 auto st_main = preint_main.back()->currentStateMain();
                 statelist_main[preint_main.size()]     = st_main;
@@ -477,6 +535,43 @@ int main(int argc, char *argv[]) {
                     auto st = preint_right.back()->currentStateWheel();
                     statelist_right[preint_right.size()]     = st;
                     statedatalist_right[preint_right.size()] = Adapter::StateToDataWheel(st, preintegration_options);
+                }
+
+                // Minimal self-checks at keyframe t_k: per-chain IMU slice stats and addresses
+                if (Debug::on(1)) {
+                    auto print_slice = [](const char *name, const std::vector<IMU> &buf) {
+                        size_t N = buf.size();
+                        double t0 = N ? buf.front().time : 0.0;
+                        double t1 = N ? buf.back().time  : 0.0;
+                        // mean |a| approximated by |dvel/dt|
+                        double asum = 0.0; size_t cnt = 0;
+                        for (const auto &m : buf) {
+                            if (m.dt > 0) { asum += (m.dvel / m.dt).norm(); cnt++; }
+                        }
+                        double a_bar = cnt ? (asum / static_cast<double>(cnt)) : 0.0;
+                        DBG_LOG(1, "CHAIN", name << " slice: N=" << N << ", [" << t0 << "," << t1 << "] a_bar=" << a_bar);
+                    };
+                    // main chain
+                    if (!preint_main.empty() && preint_main.back()->rawMain())
+                        print_slice("main", preint_main.back()->rawMain()->imuBuffer());
+                    // left wheel chain
+                    if (use_wheel_left && !preint_left.empty() && preint_left.back()->rawWheel())
+                        print_slice("left", preint_left.back()->rawWheel()->imuBuffer());
+                    // right wheel chain
+                    if (use_wheel_right && !preint_right.empty() && preint_right.back()->rawWheel())
+                        print_slice("right", preint_right.back()->rawWheel()->imuBuffer());
+
+                    // Print addresses of State objects and per-chain preintegrator instances
+                    DBG_LOG(1, "CHAIN",
+                            "main state@" << &statelist_main[preint_main.size()] << " est@" << preint_main.back().get());
+                    if (use_wheel_left) {
+                        DBG_LOG(1, "CHAIN",
+                                "left state@" << &statelist_left[preint_left.size()] << " est@" << preint_left.back().get());
+                    }
+                    if (use_wheel_right) {
+                        DBG_LOG(1, "CHAIN",
+                                "right state@" << &statelist_right[preint_right.size()] << " est@" << preint_right.back().get());
+                    }
                 }
 
                 // build and solve ceres problem
@@ -706,15 +801,21 @@ int main(int argc, char *argv[]) {
                     }
                 }
 
-                // write results at boundary（主链 + 可选左右轮链）
-                writeNavResult(*timelist.rbegin(), station_origin, statelist_main[preint_main.size()], navfile, errfile);
+                // write results at boundary（主链 + 可选左右轮链）。发布前打印将要发布的拷贝
+                {
+                    IntegrationState out = statelist_main[preint_main.size()];
+                    LOG(INFO) << "[PUB-IN] main p=" << out.p.transpose() << " q=" << out.q.coeffs().transpose();
+                    writeNavResult(*timelist.rbegin(), station_origin, out, navfile, errfile);
+                }
                 if (save_multi_imu && use_wheel_left && navfile_left.isOpen() && errfile_left.isOpen()) {
-                    auto stL = statelist_left[preint_left.size()];
-                    writeNavResultWheel(*timelist.rbegin(), station_origin, stL, navfile_left, errfile_left);
+                    auto outL = statelist_left[preint_left.size()];
+                    LOG(INFO) << "[PUB-IN] left p=" << outL.p.transpose() << " q=" << outL.q.coeffs().transpose();
+                    writeNavResultWheel(*timelist.rbegin(), station_origin, outL, navfile_left, errfile_left);
                 }
                 if (save_multi_imu && use_wheel_right && navfile_right.isOpen() && errfile_right.isOpen()) {
-                    auto stR = statelist_right[preint_right.size()];
-                    writeNavResultWheel(*timelist.rbegin(), station_origin, stR, navfile_right, errfile_right);
+                    auto outR = statelist_right[preint_right.size()];
+                    LOG(INFO) << "[PUB-IN] right p=" << outR.p.transpose() << " q=" << outR.q.coeffs().transpose();
+                    writeNavResultWheel(*timelist.rbegin(), station_origin, outR, navfile_right, errfile_right);
                 }
 
                 // start next segment preintegrations
@@ -730,14 +831,21 @@ int main(int argc, char *argv[]) {
                 // streaming output between keyframes（主链 + 可选左右轮链）
                 auto integration = *preint_main.rbegin();
                 double t_out = integration->endTime();
-                writeNavResult(t_out, station_origin, integration->currentStateMain(), navfile, errfile);
+                // 发布前打印将要发布的拷贝
+                {
+                    IntegrationState out = integration->currentStateMain();
+                    LOG(INFO) << "[PUB-IN] main p=" << out.p.transpose() << " q=" << out.q.coeffs().transpose();
+                    writeNavResult(t_out, station_origin, out, navfile, errfile);
+                }
                 if (save_multi_imu && use_wheel_left && navfile_left.isOpen() && errfile_left.isOpen()) {
-                    auto stL = preint_left.back()->currentStateWheel();
-                    writeNavResultWheel(t_out, station_origin, stL, navfile_left, errfile_left);
+                    auto outL = preint_left.back()->currentStateWheel();
+                    LOG(INFO) << "[PUB-IN] left p=" << outL.p.transpose() << " q=" << outL.q.coeffs().transpose();
+                    writeNavResultWheel(t_out, station_origin, outL, navfile_left, errfile_left);
                 }
                 if (save_multi_imu && use_wheel_right && navfile_right.isOpen() && errfile_right.isOpen()) {
-                    auto stR = preint_right.back()->currentStateWheel();
-                    writeNavResultWheel(t_out, station_origin, stR, navfile_right, errfile_right);
+                    auto outR = preint_right.back()->currentStateWheel();
+                    LOG(INFO) << "[PUB-IN] right p=" << outR.p.transpose() << " q=" << outR.q.coeffs().transpose();
+                    writeNavResultWheel(t_out, station_origin, outR, navfile_right, errfile_right);
                 }
             }
         }
