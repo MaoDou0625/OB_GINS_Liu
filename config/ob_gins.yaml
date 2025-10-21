@@ -34,6 +34,7 @@ imu_wheel_left:
   init_yaw: -3.43    # from 0701Triple112.yaml IMU_left
   antlever: [ 0.4, -0.047, -0.5 ]   # GNSSLA of IMU_left, m
   odolever: [ -0.015, 0.005, 0.005 ]   # WheelLA of IMU_left, m
+  bodyangle: [ 0, 0, 0 ]  # tuned by yaw sweep
   imunoise:
     arw: 1.2
     vrw: 6
@@ -50,6 +51,7 @@ imu_wheel_right:
   init_yaw: -3.43    # from 0701Triple112.yaml IMU_right
   antlever: [ 0.0, -0.047, -0.5 ]   # GNSSLA of IMU_right, m
   odolever: [ 0.015, -0.005, -0.005 ]   # WheelLA of IMU_right, m
+  bodyangle: [ 0, 0, 0 ]  # tuned by yaw sweep
   imunoise:
     arw: 1.2
     vrw: 6

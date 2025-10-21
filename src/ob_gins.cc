@@ -372,6 +372,21 @@ int main(int argc, char *argv[]) {
     DBG_LOG(2, "CFG",
             "odo: use=" << isuseodo << ", std=" << parameters->odo_std.transpose()
             << ", srw=" << parameters->odo_srw);
+    // 打印各链安装参数与初始姿态（便于定位右链发散）
+    LOG(INFO) << "[CFG-CHAIN] main antlever=" << antlever_main.transpose()
+              << " odolever=" << odolever_main.transpose()
+              << " bodyangle(deg)=" << (bodyangle_main * R2D).transpose()
+              << " initatt(deg)=" << (initatt_main * R2D).transpose();
+    if (use_wheel_left)
+        LOG(INFO) << "[CFG-CHAIN] left antlever=" << antlever_left.transpose()
+                  << " odolever=" << odolever_left.transpose()
+                  << " bodyangle(deg)=" << (bodyangle_left * R2D).transpose()
+                  << " initatt(deg)=" << (initatt_left * R2D).transpose();
+    if (use_wheel_right)
+        LOG(INFO) << "[CFG-CHAIN] right antlever=" << antlever_right.transpose()
+                  << " odolever=" << odolever_right.transpose()
+                  << " bodyangle(deg)=" << (bodyangle_right * R2D).transpose()
+                  << " initatt(deg)=" << (initatt_right * R2D).transpose();
 
     // GNSS outage parameters
     bool isuseoutage = config["isuseoutage"].as<bool>();
@@ -899,19 +914,89 @@ int main(int argc, char *argv[]) {
                 // write results at boundary（主链 + 可选左右轮链）。发布前打印将要发布的拷贝
                 {
                     // 使用优化后的状态（从 statedatalist_* 转回）
+                    double t_b = *timelist.rbegin();
+                    // 找到对应 GNSS（本地坐标）用于残差检查
+                    auto find_gnss = [&](double t, GNSS &gout) -> bool {
+                        for (auto it = gnsslist.rbegin(); it != gnsslist.rend(); ++it) {
+                            if (fabs(it->time - t) < MINIMUM_INTERVAL) { gout = *it; return true; }
+                        }
+                        return false;
+                    };
+                    GNSS g_at{}; bool has_g = find_gnss(t_b, g_at);
+
                     IntegrationState out = Adapter::StateFromData(statedatalist_main[preint_main.size()], preintegration_options);
                     LOG(INFO) << "[PUB-IN] main p=" << out.p.transpose() << " q=" << out.q.coeffs().transpose();
-                    writeNavResult(*timelist.rbegin(), station_origin, out, navfile, errfile);
+                    if (has_g) {
+                        Matrix3d Rm = out.q.toRotationMatrix();
+                        Vector3d pred = out.p + Rm * antlever_main;
+                        Vector3d err = pred - g_at.blh;
+                        LOG(INFO) << "[GNSS-CHECK] t=" << t_b << " main err(m)=" << err.transpose() << " |norm|=" << err.norm();
+                    }
+                    writeNavResult(t_b, station_origin, out, navfile, errfile);
                 }
                 if (save_multi_imu && use_wheel_left && navfile_left.isOpen() && errfile_left.isOpen()) {
                     auto outL = Adapter::StateFromDataWheel(statedatalist_left[preint_left.size()], preintegration_options);
                     LOG(INFO) << "[PUB-IN] left p=" << outL.p.transpose() << " q=" << outL.q.coeffs().transpose();
-                    writeNavResultWheel(*timelist.rbegin(), station_origin, outL, navfile_left, errfile_left);
+                    // GNSS 残差检查（左链）
+                    double t_b = *timelist.rbegin(); GNSS g_at{}; bool has_g = false;
+                    for (auto it = gnsslist.rbegin(); it != gnsslist.rend(); ++it) { if (fabs(it->time - t_b) < MINIMUM_INTERVAL) { g_at = *it; has_g = true; break; } }
+                    if (has_g) {
+                        Matrix3d Rl = outL.q.toRotationMatrix();
+                        Vector3d predL = outL.p + Rl * antlever_left;
+                        Vector3d errL = predL - g_at.blh;
+                        LOG(INFO) << "[GNSS-CHECK] t=" << t_b << " left err(m)=" << errL.transpose() << " |norm|=" << errL.norm();
+                        static bool sweep_printed_left = false;
+                        if (!sweep_printed_left) {
+                            auto Rz = [](double yaw_rad) { Matrix3d R; double c = cos(yaw_rad), s = sin(yaw_rad); R << c,-s,0, s,c,0, 0,0,1; return R; };
+                            std::vector<double> cand_deg = {-180.0, -90.0, -45.0, 0.0, 45.0, 90.0, 180.0};
+                            std::ostringstream oss; oss << "[GNSS-CHECK] left yaw_sweep(deg->norm):";
+                            double best_deg = 0.0, best_norm = std::numeric_limits<double>::infinity();
+                            for (double d : cand_deg) {
+                                Vector3d pred_off = outL.p + Rl * Rz(d * D2R) * antlever_left;
+                                double n = (pred_off - g_at.blh).norm();
+                                oss << " " << d << "->" << n;
+                                if (n < best_norm) { best_norm = n; best_deg = d; }
+                            }
+                            LOG(INFO) << oss.str();
+                            LOG(INFO) << "[GNSS-CHECK] left yaw_best(deg)=" << best_deg << " norm=" << best_norm;
+                            sweep_printed_left = true;
+                        }
+                    }
+                    writeNavResultWheel(t_b, station_origin, outL, navfile_left, errfile_left);
                 }
                 if (save_multi_imu && use_wheel_right && navfile_right.isOpen() && errfile_right.isOpen()) {
                     auto outR = Adapter::StateFromDataWheel(statedatalist_right[preint_right.size()], preintegration_options);
                     LOG(INFO) << "[PUB-IN] right p=" << outR.p.transpose() << " q=" << outR.q.coeffs().transpose();
-                    writeNavResultWheel(*timelist.rbegin(), station_origin, outR, navfile_right, errfile_right);
+                    // GNSS 残差检查（右链）
+                    double t_b = *timelist.rbegin(); GNSS g_at{}; bool has_g = false;
+                    for (auto it = gnsslist.rbegin(); it != gnsslist.rend(); ++it) { if (fabs(it->time - t_b) < MINIMUM_INTERVAL) { g_at = *it; has_g = true; break; } }
+                    if (has_g) {
+                        Matrix3d Rr = outR.q.toRotationMatrix();
+                        Vector3d predR = outR.p + Rr * antlever_right;
+                        Vector3d errR = predR - g_at.blh;
+                        LOG(INFO) << "[GNSS-CHECK] t=" << t_b << " right err(m)=" << errR.transpose() << " |norm|=" << errR.norm();
+                        // 仅在首次打印时，扫描若干右链 yaw 安装角候选，辅助定位坐标系差异
+                        static bool sweep_printed = false;
+                        if (!sweep_printed) {
+                            auto Rz = [](double yaw_rad) {
+                                Matrix3d R; double c = cos(yaw_rad), s = sin(yaw_rad);
+                                R << c,-s,0, s,c,0, 0,0,1; return R;
+                            };
+                            std::vector<double> cand_deg = {-180.0, -90.0, -45.0, 0.0, 45.0, 90.0, 180.0};
+                            std::ostringstream oss; oss << "[GNSS-CHECK] right yaw_sweep(deg->norm):";
+                            double best_deg = 0.0, best_norm = std::numeric_limits<double>::infinity();
+                            for (double d : cand_deg) {
+                                Vector3d pred_off = outR.p + Rr * Rz(d * D2R) * antlever_right;
+                                double n = (pred_off - g_at.blh).norm();
+                                oss << " " << d << "->" << n;
+                                if (n < best_norm) { best_norm = n; best_deg = d; }
+                            }
+                            LOG(INFO) << oss.str();
+                            LOG(INFO) << "[GNSS-CHECK] right yaw_best(deg)=" << best_deg << " norm=" << best_norm;
+                            sweep_printed = true;
+                        }
+                    }
+                    writeNavResultWheel(t_b, station_origin, outR, navfile_right, errfile_right);
                 }
 
                 // start next segment preintegrations（左右链从各自末态起步）
@@ -924,12 +1009,12 @@ int main(int argc, char *argv[]) {
                 if (use_wheel_left) {
                     IntegrationState left_state = toIntegration(statelist_left[preint_left.size()]);
                     preint_left.emplace_back(Adapter::UnifiedPreintegrator::Create(
-                        parameters, imu_pre_left, left_state, preintegration_options, true));
+                        parameters_left, imu_pre_left, left_state, preintegration_options, true));
                 }
                 if (use_wheel_right) {
                     IntegrationState right_state = toIntegration(statelist_right[preint_right.size()]);
                     preint_right.emplace_back(Adapter::UnifiedPreintegrator::Create(
-                        parameters, imu_pre_right, right_state, preintegration_options, true));
+                        parameters_right, imu_pre_right, right_state, preintegration_options, true));
                 }
             } else {
                 // streaming output between keyframes（主链 + 可选左右轮链）
