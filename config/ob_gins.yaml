@@ -59,7 +59,7 @@ imu_wheel_right:
 
 # 时间信息, s
 # Processing time parameters
-windows: 30
+windows: 50
 starttime: 132025
 endtime: 132225
 ## 可选：关键帧时间间隔（秒），默认 1.0；设置为 0.05 可约 20 Hz
