@@ -65,6 +65,8 @@ void writeNavResult(double time, const Vector3d &origin, const IntegrationState 
 void writeNavResultWheel(double time, const Vector3d &origin, const WheelIntegrationState &state, FileSaver &navfile,
                          FileSaver &errfile);
 
+// YAML 安全读取：宽松解析布尔量（支持 true/false/1/0/yes/no/on/off，字符串或数值均可）
+
 // YAML 瀹夊叏璇诲彇锛氬鏉捐В鏋愬竷灏旈噺锛堟敮鎸?true/false/1/0/yes/no/on/off锛屽瓧绗︿覆鎴栨暟鍊煎潎鍙級
 static bool yamlToBool(const YAML::Node &node, bool def = false) {
     try {
