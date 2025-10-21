@@ -8,7 +8,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 if (MSVC)
     # Avoid passing GCC/Clang flags like -O3/-Wall to MSVC
-    add_compile_options(/permissive-)
+    # Force UTF-8 source file encoding to eliminate comment garbling on MSVC
+    add_compile_options(/permissive- /utf-8)
 else ()
     if (CMAKE_BUILD_TYPE MATCHES "Debug")
         add_compile_options(-Wall)
