@@ -5,6 +5,7 @@
 
 #include <memory>
 #include <deque>
+#include <vector>
 
 #include "src/common/types.h"
 
@@ -35,6 +36,9 @@ public:
 
     IntegrationState      currentStateMain() const;
     WheelIntegrationState currentStateWheel() const;
+
+    // 返回当前分段将用于预积分的 IMU 队列（只读视图）
+    const std::vector<IMU> &inputView() const;
 
     std::shared_ptr<PreintegrationBase>      rawMain() const { return preint_main_; }
     std::shared_ptr<WheelPreintegrationBase> rawWheel() const { return preint_wheel_; }
