@@ -17,6 +17,7 @@ imu_main:
   columns: 7
   rate_hz: 200
   init_yaw: -93.43   # from 0701Triple112.yaml IMU_up
+  antlever: [ 0.0, 0.1, -0.247 ]   # GNSSLA of IMU_up (IMU->GNSS), m
   imunoise:
     arw: 1.2
     vrw: 6
@@ -31,6 +32,8 @@ imu_wheel_left:
   columns: 9
   rate_hz: 200
   init_yaw: -3.43    # from 0701Triple112.yaml IMU_left
+  antlever: [ 0.4, -0.047, -0.5 ]   # GNSSLA of IMU_left, m
+  odolever: [ -0.015, 0.005, 0.005 ]   # WheelLA of IMU_left, m
   imunoise:
     arw: 1.2
     vrw: 6
@@ -45,6 +48,8 @@ imu_wheel_right:
   columns: 9
   rate_hz: 200
   init_yaw: -3.43    # from 0701Triple112.yaml IMU_right
+  antlever: [ 0.0, -0.047, -0.5 ]   # GNSSLA of IMU_right, m
+  odolever: [ 0.015, -0.005, -0.005 ]   # WheelLA of IMU_right, m
   imunoise:
     arw: 1.2
     vrw: 6
