@@ -22,7 +22,9 @@ set(EXECUTABLE_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/bin)
 
 file(GLOB_RECURSE SOURCE
         src/ob_gins.cc
+        src/core/imu_chain.cc
         src/common/debug.cc
+        src/common/interpolation.cc
         src/bridge/imu_adapter.cc
         src/fileio/fileloader.cc
         src/fileio/filesaver.cc
