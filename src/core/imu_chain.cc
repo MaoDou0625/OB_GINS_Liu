@@ -1,5 +1,6 @@
 #include "imu_chain.h"
 #include "src/common/logging.h"
+#include "src/common/angle.h"
 #include "src/core/preintegration_factory.h"
 #include "src/factors/marginalization_info.h"
 #include "src/factors/pose_manifold.h"
@@ -38,51 +39,6 @@ Vector3d ImuChain::readVec3(const YAML::Node& node, const char* key, const Vecto
         }
     } catch (...) {}
     return fallback;
-}
-
-// IMU interpolation helpers (moved from ob_gins.cc)
-int isNeedInterpolation(const IMU &imu0, const IMU &imu1, double mid) {
-    double time = mid;
-
-    if (imu0.time < time && imu1.time > time) {
-        double dt = time - imu0.time;
-
-        // close to the first epoch
-        if (dt < 0.0001) {
-            return -1;
-        }
-
-        // close to the second epoch
-        dt = imu1.time - time;
-        if (dt < 0.0001) {
-            return 1;
-        }
-
-        return 2;
-    }
-
-    return 0;
-}
-
-void imuInterpolation(const IMU &imu01, IMU &imu00, IMU &imu11, double mid) {
-    double time = mid;
-
-    double scale = (imu01.time - time) / imu01.dt;
-    IMU buff     = imu01;
-
-    imu00.time   = time;
-    imu00.dt     = buff.dt - (buff.time - time);
-    imu00.dtheta = buff.dtheta * (1 - scale);
-    imu00.dvel   = buff.dvel * (1 - scale);
-    imu00.odovel = buff.odovel * (1 - scale);
-    imu00.is_wheel = buff.is_wheel;
-
-    imu11.time   = buff.time;
-    imu11.dt     = buff.time - time;
-    imu11.dtheta = buff.dtheta * scale;
-    imu11.dvel   = buff.dvel * scale;
-    imu11.odovel = buff.odovel * scale;
-    imu11.is_wheel = buff.is_wheel;
 }
 
 ImuChain::ImuChain(std::string name, const YAML::Node& chain_node, const YAML::Node& global_config)
