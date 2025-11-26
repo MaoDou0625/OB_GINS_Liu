@@ -12,6 +12,7 @@ save_multi_imu: true
 
 # multi-IMU independent configs (main/left/right)
 imu_main:
+  type: "standard"
   file: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Body-IMU/C1_imu_increments.txt"
   #file: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Wheel-IMU-Left/C1_imu_increments.txt"
   #file: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Wheel-IMU-Right/C1_imu_increments.txt"
@@ -29,6 +30,7 @@ imu_main:
     corrtime: 1.0
 
 imu_wheel_left:
+  type: "wheel"
   #file: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Wheel-IMU-Left/C1_imu_increments.txt"
   file: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Wheel-IMU-Right/C1_imu_increments.txt"
   
@@ -48,6 +50,7 @@ imu_wheel_left:
     corrtime: 1.0
 
 imu_wheel_right:
+  type: "wheel"
   #file: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Wheel-IMU-Right/C1_imu_increments.txt"
   file: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Wheel-IMU-Left/C1_imu_increments.txt"
   columns: 9

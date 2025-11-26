@@ -88,8 +88,17 @@ ImuChain::ImuChain(std::string name, const YAML::Node& chain_node, const YAML::N
       parameters_(std::make_shared<IntegrationParameters>()) {
 
     is_enabled_ = true;
-    if (name_.find("wheel") != std::string::npos) {
-        is_wheel_ = true;
+    is_wheel_ = false;  // Default to standard
+    try {
+        if (chain_node["type"]) {
+            std::string type_str = chain_node["type"].as<std::string>();
+            if (type_str == "wheel") {
+                is_wheel_ = true;
+            }
+        }
+    } catch (const YAML::Exception& e) {
+        LOG(WARNING) << "[Chain] Failed to parse 'type' for chain '" << name_
+                     << "'. Defaulting to standard. Error: " << e.what();
     }
     
     // --- Load Chain-Specific or Global Parameters ---
