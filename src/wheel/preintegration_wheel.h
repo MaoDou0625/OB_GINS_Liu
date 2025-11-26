@@ -88,5 +88,63 @@ public:
     }
 };
 
+#include "src/core/i_unified_preintegrator.h"
+#include "src/wheel/preintegration_wheel_factor.h"
+#include "src/wheel/imu_error_factor_wheel.h"
+
+class WheelPreintegratorAdapter : public IUnifiedPreintegrator {
+public:
+    WheelPreintegratorAdapter(const std::shared_ptr<IntegrationParameters>& params, const IMU& first_imu,
+                              const IntegrationState& init_state, WheelPreintegration::PreintegrationOptions options)
+        : options_(options) {
+        // Since the state structs are identical, we can safely reinterpret_cast.
+        // This avoids a field-by-field copy. The alternative is a new constructor or a conversion function.
+        auto wheel_params = std::reinterpret_pointer_cast<WheelIntegrationParameters>(params);
+        const auto& wheel_init_state = reinterpret_cast<const WheelIntegrationState&>(init_state);
+        preint_impl_ = WheelPreintegration::createPreintegration(wheel_params, first_imu, wheel_init_state, options);
+    }
+
+    void addNewImu(const IMU& imu) override {
+        preint_impl_->addNewImu(imu);
+    }
+
+    double getEndTime() const override {
+        return preint_impl_->endTime();
+    }
+
+    void propagateState(IntegrationState& state_to_update) const override {
+        const auto& wheel_state = preint_impl_->currentState();
+        // The structs are identical, so we can reinterpret_cast to copy.
+        state_to_update = reinterpret_cast<const IntegrationState&>(wheel_state);
+    }
+
+    void syncStateFromData(const IntegrationStateData& data, IntegrationState& state_to_update) override {
+        const auto& wheel_data = reinterpret_cast<const WheelIntegrationStateData&>(data);
+        auto wheel_state = WheelPreintegration::stateFromData(wheel_data, options_);
+        state_to_update = reinterpret_cast<const IntegrationState&>(wheel_state);
+    }
+
+    ceres::CostFunction* createImuFactor() override {
+        return new WheelPreintegrationFactor(preint_impl_);
+    }
+
+    ceres::CostFunction* createImuErrorFactor() override {
+        return new WheelImuErrorFactor(preint_impl_);
+    }
+
+    int getPoseParamSize() const override {
+        return WheelPreintegration::numPoseParameter();
+    }
+
+    int getMixParamSize() const override {
+        return WheelPreintegration::numMixParameter(options_);
+    }
+
+private:
+    std::shared_ptr<WheelPreintegrationBase> preint_impl_;
+    WheelPreintegration::PreintegrationOptions options_;
+};
+
+
 #endif // WHEEL_PREINTEGRATION_H
 

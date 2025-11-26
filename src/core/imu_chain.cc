@@ -1,5 +1,9 @@
 #include "imu_chain.h"
 #include "src/common/logging.h"
+#include "src/core/preintegration_factory.h"
+#include "src/factors/marginalization_info.h"
+#include "src/factors/pose_manifold.h"
+#include "src/factors/residual_block_info.h"
 
 #include <algorithm>
 #include <cctype>
@@ -83,22 +87,19 @@ void imuInterpolation(const IMU &imu01, IMU &imu00, IMU &imu11, double mid) {
 
 ImuChain::ImuChain(std::string name, const YAML::Node& chain_node, const YAML::Node& global_config)
     : name_(std::move(name)), 
-      is_wheel_(false), 
+      type_("standard"), // Default to standard
       is_enabled_(false), 
       parameters_(std::make_shared<IntegrationParameters>()) {
 
     is_enabled_ = true;
-    is_wheel_ = false;  // Default to standard
     try {
         if (chain_node["type"]) {
-            std::string type_str = chain_node["type"].as<std::string>();
-            if (type_str == "wheel") {
-                is_wheel_ = true;
-            }
+            type_ = chain_node["type"].as<std::string>();
         }
     } catch (const YAML::Exception& e) {
         LOG(WARNING) << "[Chain] Failed to parse 'type' for chain '" << name_
-                     << "'. Defaulting to standard. Error: " << e.what();
+                     << "'. Defaulting to 'standard'. Error: " << e.what();
+        type_ = "standard";
     }
     
     // --- Load Chain-Specific or Global Parameters ---
@@ -162,7 +163,7 @@ ImuChain::ImuChain(std::string name, const YAML::Node& chain_node, const YAML::N
     if (chain_node["columns"])   imu_datalen  = chain_node["columns"].as<int>();
     if (chain_node["rate_hz"])   imu_datarate = chain_node["rate_hz"].as<int>();
 
-    loader_ = std::make_unique<ImuFileLoader>(imu_path, imu_datalen, imu_datarate, is_wheel_);
+    loader_ = std::make_unique<ImuFileLoader>(imu_path, imu_datalen, imu_datarate, (type_ == "wheel"));
     if (!loader_->isOpen()) {
         LOG(ERROR) << "[IO] Failed to open IMU file for chain '" << name_ << "': " << imu_path;
         is_enabled_ = false;
@@ -184,13 +185,13 @@ ImuChain::ImuChain(std::string name, const YAML::Node& chain_node, const YAML::N
     // --- Preintegration Options ---
     bool isuseodo = yamlToBool(global_config["odometer"]["isuseodo"], false);
     bool isearth = yamlToBool(global_config["isearth"], true);
-    preintegration_options_ = Adapter::GetOptions(isuseodo, isearth);
+    preintegration_options_ = Preintegration::getOptions(isuseodo, isearth);
 
     int windows = global_config["windows"].as<int>();
     state_data_list_.resize(windows + 1);
     state_list_.resize(windows + 1);
 
-    LOG(INFO) << "[Chain] Initialized chain '" << name_ << "': enabled=" << is_enabled_ << ", is_wheel=" << is_wheel_;
+    LOG(INFO) << "[Chain] Initialized chain '" << name_ << "' with type '" << type_ << "': enabled=" << is_enabled_;
 }
 
 void ImuChain::alignToTime(double start_time) {
@@ -221,7 +222,7 @@ bool ImuChain::initializeFirstState(const GNSS& initial_gnss, const Vector3d& st
         .abv  = {parameters_->abv[1], parameters_->abv[2]},
     };
     
-    state_data_list_[0] = Adapter::StateToData(state_list_[0], preintegration_options_);
+    state_data_list_[0] = PreintegrationFactory::getInstance().stateToData(type_, state_list_[0], preintegration_options_);
 
     startNewPreintegration();
     return true;
@@ -248,62 +249,60 @@ void ImuChain::processImuUpTo(double time_boundary) {
         imu_pre_ = interp_imu;
     }
     
-    // After processing, update the state list
+    // After processing, update the state list by calling the polymorphic method
     size_t current_idx = preintegrators_.size();
-    if (is_wheel_) {
-        // Have to handle WheelIntegrationState vs IntegrationState conversion
-        WheelIntegrationState ws = preintegrators_.back()->currentStateWheel();
-        state_list_[current_idx].time = ws.time;
-        state_list_[current_idx].p = ws.p;
-        state_list_[current_idx].q = ws.q;
-        state_list_[current_idx].v = ws.v;
-        state_list_[current_idx].bg = ws.bg;
-        state_list_[current_idx].ba = ws.ba;
-    } else {
-        state_list_[current_idx] = preintegrators_.back()->currentStateMain();
-    }
-    state_data_list_[current_idx] = Adapter::StateToData(state_list_[current_idx], preintegration_options_);
+    preintegrators_.back()->propagateState(state_list_[current_idx]);
+    
+    // Convert the C++ state to a raw data array for the optimizer
+    state_data_list_[current_idx] = PreintegrationFactory::getInstance().stateToData(type_, state_list_[current_idx], preintegration_options_);
 }
 
 void ImuChain::startNewPreintegration() {
     if (!is_enabled_) return;
     const auto& last_state = state_list_[preintegrators_.size()];
-    preintegrators_.emplace_back(
-        Adapter::UnifiedPreintegrator::Create(parameters_, imu_pre_, last_state, preintegration_options_, is_wheel_)
-    );
+
+    PreintegrationCreationParams p = {
+        .params = parameters_,
+        .first_imu = imu_pre_,
+        .init_state = last_state,
+        .options = preintegration_options_
+    };
+    
+    auto preintegrator = PreintegrationFactory::getInstance().create(type_, p);
+    if (!preintegrator) {
+        LOG(FATAL) << "[Chain] Failed to create preintegrator for type '" << type_ << "'";
+        return;
+    }
+    preintegrators_.emplace_back(std::move(preintegrator));
 }
 
 void ImuChain::syncStatesFromOptimizer() {
     if (!is_enabled_) return;
+    auto& factory = PreintegrationFactory::getInstance();
     for (size_t i = 0; i < state_list_.size(); ++i) {
-        if (is_wheel_) {
-            auto ws = Adapter::StateFromDataWheel(state_data_list_[i], preintegration_options_);
-            state_list_[i].time = ws.time; state_list_[i].p = ws.p; state_list_[i].q = ws.q; state_list_[i].v = ws.v;
-            state_list_[i].bg = ws.bg; state_list_[i].ba = ws.ba;
-        } else {
-            state_list_[i] = Adapter::StateFromData(state_data_list_[i], preintegration_options_);
-        }
+        state_list_[i] = factory.stateFromData(type_, state_data_list_[i], preintegration_options_);
     }
 }
 
 void ImuChain::addParameterBlocksTo(ceres::Problem& problem, size_t max_idx) {
-    if (!is_enabled_) return;
+    if (!is_enabled_ || preintegrators_.empty()) return;
+
+    // Parameter block sizes are constant for a given chain type.
+    // Get them once from the first preintegrator.
+    const int pose_size = preintegrators_.front()->getPoseParamSize();
+    const int mix_size = preintegrators_.front()->getMixParamSize();
+
     for (size_t k = 0; k <= max_idx; k++) {
         ceres::Manifold* manifold = new PoseManifold();
-        if (is_wheel_) {
-            problem.AddParameterBlock(state_data_list_[k].pose, Adapter::NumPoseParameterWheel(), manifold);
-            problem.AddParameterBlock(state_data_list_[k].mix, Adapter::NumMixParameterWheel(preintegration_options_));
-        } else {
-            problem.AddParameterBlock(state_data_list_[k].pose, Adapter::NumPoseParameter(), manifold);
-            problem.AddParameterBlock(state_data_list_[k].mix, Adapter::NumMixParameter(preintegration_options_));
-        }
+        problem.AddParameterBlock(state_data_list_[k].pose, pose_size, manifold);
+        problem.AddParameterBlock(state_data_list_[k].mix, mix_size);
     }
 }
 
 void ImuChain::addImuFactorsTo(ceres::Problem& problem, size_t max_idx) {
     if (!is_enabled_) return;
     for (size_t k = 0; k < max_idx; k++) {
-        auto factor = Adapter::MakePreintFactor(preintegrators_[k]);
+        auto factor = preintegrators_[k]->createImuFactor();
         problem.AddResidualBlock(factor, nullptr, 
                                  state_data_list_[k].pose, state_data_list_[k].mix,
                                  state_data_list_[k+1].pose, state_data_list_[k+1].mix);
@@ -327,7 +326,7 @@ bool ImuChain::addGnssFactorTo(ceres::Problem& problem, const GNSS& gnss, ceres:
 
 void ImuChain::addBiasFactorTo(ceres::Problem& problem, size_t idx) {
     if (!is_enabled_) return;
-    auto factor = Adapter::MakeImuErrorFactor(preintegrators_[idx-1]);
+    auto factor = preintegrators_[idx-1]->createImuErrorFactor();
     problem.AddResidualBlock(factor, nullptr, state_data_list_[idx].mix);
 }
 
@@ -375,7 +374,7 @@ void ImuChain::slideWindow(const std::deque<double>& time_list, const std::deque
 void ImuChain::addFactorsToMarginalizationInfo(std::shared_ptr<MarginalizationInfo>& marginalization_info, const GNSS& gnss) {
     if (!is_enabled_) return;
 
-    auto factor   = std::shared_ptr<ceres::CostFunction>(Adapter::MakePreintFactor(preintegrators_[0]));
+    auto factor   = std::shared_ptr<ceres::CostFunction>(preintegrators_[0]->createImuFactor());
     auto residual = std::make_shared<ResidualBlockInfo>(
         factor, nullptr,
         std::vector<double *>{state_data_list_[0].pose, state_data_list_[0].mix,

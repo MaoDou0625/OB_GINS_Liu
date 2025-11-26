@@ -7,8 +7,7 @@
 #include "src/fileio/imufileloader.h"
 #include "src/factors/gnss_factor.h"
 #include "src/preintegration/preintegration.h"
-#include "src/wheel/integration_state_wheel.h"
-#include "src/bridge/imu_adapter.h"
+#include "src/core/i_unified_preintegrator.h"
 #include "src/common/interpolation.h"
 
 #include <ceres/ceres.h>
@@ -79,15 +78,15 @@ public:
 
     // Accessors
     const std::string& getName() const { return name_; }
+    const std::string& getType() const { return type_; }
     bool isEnabled() const { return is_enabled_; }
-    bool isWheel() const { return is_wheel_; }
     double currentImuTime() const { return imu_cur_.time; }
     IMU& currentImu() { return imu_cur_; }
     const IMU& currentImu() const { return imu_cur_; }
     IMU& previousImu() { return imu_pre_; }
     const IMU& previousImu() const { return imu_pre_; }
     ImuFileLoader* getLoader() { return loader_.get(); }
-    std::deque<std::shared_ptr<Adapter::UnifiedPreintegrator>>& getPreintegrators() { return preintegrators_; }
+    std::deque<std::unique_ptr<IUnifiedPreintegrator>>& getPreintegrators() { return preintegrators_; }
     std::vector<IntegrationState>& getStateList() { return state_list_; }
     std::vector<IntegrationStateData>& getStateDataList() { return state_data_list_; }
 
@@ -99,13 +98,13 @@ private:
 public:
     // Chain's identifier and type
     std::string name_;
-    bool is_wheel_;
+    std::string type_;
     bool is_enabled_;
 
     // Chain-specific parameters
     Vector3d initial_attitude_;
     Vector3d antlever_;
-    Adapter::UnifiedPreintegrator::Options preintegration_options_;
+    Preintegration::PreintegrationOptions preintegration_options_;
     std::shared_ptr<IntegrationParameters> parameters_;
     Vector3d initial_vel_{Vector3d::Zero()};
     Vector3d initial_bg_{Vector3d::Zero()};
@@ -117,13 +116,12 @@ public:
     FileSaver err_saver_;
     
     // State and data for the optimization window
-    std::deque<std::shared_ptr<Adapter::UnifiedPreintegrator>> preintegrators_;
+    std::deque<std::unique_ptr<IUnifiedPreintegrator>> preintegrators_;
     std::vector<IntegrationStateData> state_data_list_;
     std::vector<IntegrationState> state_list_;
 
     // Temporary buffer for IMU measurements
     IMU imu_pre_, imu_cur_;
 };
-
 
 #endif // OB_GINS_IMU_CHAIN_H

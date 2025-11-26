@@ -118,4 +118,54 @@ public:
     }
 };
 
+#include "src/core/i_unified_preintegrator.h"
+#include "src/preintegration/preintegration_factor.h"
+#include "src/preintegration/imu_error_factor.h"
+
+class StandardPreintegratorAdapter : public IUnifiedPreintegrator {
+public:
+    StandardPreintegratorAdapter(const std::shared_ptr<IntegrationParameters>& params, const IMU& first_imu,
+                                 const IntegrationState& init_state, Preintegration::PreintegrationOptions options)
+        : options_(options) {
+        preint_impl_ = Preintegration::createPreintegration(params, first_imu, init_state, options);
+    }
+
+    void addNewImu(const IMU& imu) override {
+        preint_impl_->addNewImu(imu);
+    }
+
+    double getEndTime() const override {
+        return preint_impl_->endTime();
+    }
+
+    void propagateState(IntegrationState& state_to_update) const override {
+        state_to_update = preint_impl_->currentState();
+    }
+
+    void syncStateFromData(const IntegrationStateData& data, IntegrationState& state_to_update) override {
+        state_to_update = Preintegration::stateFromData(data, options_);
+    }
+
+    ceres::CostFunction* createImuFactor() override {
+        return new PreintegrationFactor(preint_impl_);
+    }
+
+    ceres::CostFunction* createImuErrorFactor() override {
+        return new ImuErrorFactor(preint_impl_);
+    }
+
+    int getPoseParamSize() const override {
+        return Preintegration::numPoseParameter();
+    }
+
+    int getMixParamSize() const override {
+        return Preintegration::numMixParameter(options_);
+    }
+
+private:
+    std::shared_ptr<PreintegrationBase> preint_impl_;
+    Preintegration::PreintegrationOptions options_;
+};
+
+
 #endif // PREINTEGRATION_H

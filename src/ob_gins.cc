@@ -28,6 +28,7 @@
 #include "src/fileio/gnssfileloader.h"
 #include "src/factors/marginalization_factor.h"
 #include "src/factors/pose_manifold.h"
+#include "src/core/preintegration_factory.h"
 
 #include <ceres/ceres.h>
 #include <yaml-cpp/yaml.h>
@@ -67,6 +68,8 @@ static bool yamlToBool(const YAML::Node &node, bool def = false) {
 }
 
 int main(int argc, char *argv[]) {
+    initializePreintegrationFactory();
+    
     if (argc != 2) {
         std::cout << "usage: ob_gins ob_gins.yaml" << std::endl;
         return -1;
