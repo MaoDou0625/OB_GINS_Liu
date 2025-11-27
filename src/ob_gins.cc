@@ -24,6 +24,7 @@
 #include "src/common/types.h"
 #include "src/common/logging.h"
 #include "src/common/debug.h"
+#include "src/common/angle.h"
 #include "src/core/imu_chain.h"
 #include "src/fileio/gnssfileloader.h"
 #include "src/factors/marginalization_factor.h"
@@ -42,6 +43,8 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdlib>
+#include <limits>
 
 #define INTEGRATION_LENGTH 1.0
 #define MINIMUM_INTERVAL 0.001
@@ -160,20 +163,51 @@ int main(int argc, char *argv[]) {
     // Align each chain to start time
     for (auto &chain : chains) chain->alignToTime(starttime);
 
-    // Initial GNSS
-    GNSS gnss;
-    do { gnss = gnssfile.next(); } while (gnss.time < starttime);
-    Vector3d station_origin = gnss.blh;
+    // Initial GNSS: choose the closest epoch *not later* than the navigation start time.
+    // If no such epoch exists, fall back to the very first record.
+    GNSS gnss = gnssfile.next();
+    GNSS best_gnss = gnss;
+    GNSS next_gnss{};
+    bool has_next_after_start = false;
+    while (!gnssfile.isEof()) {
+        GNSS cur = gnssfile.next();
+        if (cur.time <= starttime) {
+            best_gnss = cur;  // keep the latest GNSS before starttime
+        } else {
+            next_gnss = cur;  // first GNSS after starttime
+            has_next_after_start = true;
+            break;
+        }
+    }
+    Vector3d station_origin = best_gnss.blh;
+
+    if (Debug::on(1)) {
+        Vector3d blh_deg = best_gnss.blh * R2D;
+        Debug::print(1, "INIT_GNSS",
+                     "t=" + std::to_string(best_gnss.time) +
+                     " lat(deg)=" + std::to_string(blh_deg[0]) +
+                     " lon(deg)=" + std::to_string(blh_deg[1]) +
+                     " h(m)=" + std::to_string(best_gnss.blh[2]));
+    }
 
     // Initialize chains
-    for (auto &chain : chains) chain->initializeFirstState(gnss, station_origin);
-    gnss.blh = Earth::global2local(station_origin, gnss.blh);
+    for (auto &chain : chains) chain->initializeFirstState(best_gnss, station_origin);
+    best_gnss.blh = Earth::global2local(station_origin, best_gnss.blh);
+
+    // Save initial navigation output at start time
+    for (auto &chain : chains) chain->writeResult(best_gnss.time, station_origin, 0);
 
     std::deque<double> timelist;
     std::deque<GNSS> gnsslist;
-    double sow = round(gnss.time);
+    double sow = round(best_gnss.time);
+    if (Debug::on(2)) {
+        Debug::print(2, "INIT_TIME",
+                     "best_gnss.t=" + std::to_string(best_gnss.time) +
+                     " sow(round)=" + std::to_string(sow) +
+                     " diff=" + std::to_string(fabs(best_gnss.time - sow)));
+    }
     timelist.push_back(sow);
-    gnsslist.push_back(gnss);
+    gnsslist.push_back(best_gnss);
     sow += integration_length;
 
     // GNSS outage params
@@ -184,7 +218,11 @@ int main(int argc, char *argv[]) {
     auto gnssthreshold = config["gnssthreshold"].as<double>();
 
     // Prime next GNSS
-    gnss = gnssfile.next();
+    if (has_next_after_start) {
+        gnss = next_gnss;
+    } else {
+        gnss.time = std::numeric_limits<double>::infinity();  // no GNSS after start time
+    }
 
     std::shared_ptr<MarginalizationInfo> last_marginalization_info;
     std::vector<double *> last_marginalization_parameter_blocks;
@@ -224,6 +262,12 @@ int main(int argc, char *argv[]) {
 
         // GNSS at boundary
         if (fabs(gnss.time - sow) < MINIMUM_INTERVAL) {
+            if (Debug::on(2)) {
+                Debug::print(2, "GNSS_PUSH",
+                             "sow=" + std::to_string(sow) +
+                             " gnss.t=" + std::to_string(gnss.time) +
+                             " diff=" + std::to_string(fabs(gnss.time - sow)));
+            }
             gnsslist.push_back(gnss);
             gnss = gnssfile.next();
             while ((gnss.std[0] > gnssthreshold) || (gnss.std[1] > gnssthreshold) || (gnss.std[2] > gnssthreshold)) {
@@ -384,6 +428,48 @@ int main(int argc, char *argv[]) {
 
     auto te = std::chrono::steady_clock::now();
     std::cout << std::endl << std::endl << "Cost " << std::chrono::duration<double>(te - ts).count() << " s in total" << std::endl;
+
+    // Run comparison script if enabled
+    if (config["comparison"] && yamlToBool(config["comparison"]["enable"], false)) {
+        try {
+            std::string script_path = config["comparison"]["python_script"].as<std::string>();
+            std::string truth_path = config["comparison"]["truth_file"].as<std::string>();
+            
+            std::filesystem::path nav_path(outputpath);
+            nav_path /= "OB_GINS_TXT.nav";
+            
+            if (std::filesystem::exists(script_path) && std::filesystem::exists(truth_path) && std::filesystem::exists(nav_path)) {
+                std::cout << "\n[info] Running comparison script..." << std::endl;
+                
+                auto quote_if_needed = [](const std::string& path) {
+                    if (path.find(' ') != std::string::npos) {
+                        return "\"" + path + "\"";
+                    }
+                    return path;
+                };
+                std::string command = "python " + quote_if_needed(script_path) + " " + quote_if_needed(nav_path.string()) + " " + quote_if_needed(truth_path);
+                
+                // Add label if specified
+                //if (config["comparison"]["label"]) {
+                //    command += " --label " + quote_if_needed(config["comparison"]["label"].as<std::string>());
+                //}
+
+                std::cout << "[cmd] " << command << std::endl;
+                int ret = std::system(command.c_str());
+                if (ret == 0) {
+                    std::cout << "[info] Comparison script finished successfully." << std::endl;
+                } else {
+                    std::cout << "[error] Comparison script exited with code " << ret << std::endl;
+                }
+            } else {
+                if (!std::filesystem::exists(script_path)) std::cout << "[error] Python script not found: " << script_path << std::endl;
+                if (!std::filesystem::exists(truth_path)) std::cout << "[error] Truth file not found: " << truth_path << std::endl;
+                if (!std::filesystem::exists(nav_path)) std::cout << "[error] Navigation output file not found: " << nav_path.string() << std::endl;
+            }
+        } catch (const std::exception& e) {
+            std::cout << "[error] Failed to execute comparison script: " << e.what() << std::endl;
+        }
+    }
 
     return 0;
 }

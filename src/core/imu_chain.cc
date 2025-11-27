@@ -1,6 +1,7 @@
 #include "imu_chain.h"
 #include "src/common/logging.h"
 #include "src/common/angle.h"
+#include "src/common/debug.h"
 #include "src/core/preintegration_factory.h"
 #include "src/factors/marginalization_info.h"
 #include "src/factors/pose_manifold.h"
@@ -271,11 +272,24 @@ bool ImuChain::addGnssFactorTo(ceres::Problem& problem, const GNSS& gnss, ceres:
     // Find the time index corresponding to the GNSS measurement
     for (size_t i = 0; i < time_list.size(); ++i) {
         if (fabs(gnss.time - time_list[i]) < 0.001) {
+            if (Debug::on(2)) {
+                Debug::print(2, "GNSS_MATCH",
+                             "chain=" + name_ +
+                             " meas_t=" + std::to_string(gnss.time) +
+                             " key_t=" + std::to_string(time_list[i]) +
+                             " diff=" + std::to_string(fabs(gnss.time - time_list[i])));
+            }
             auto factor = new GnssFactor(gnss, antlever_);
             auto id = problem.AddResidualBlock(factor, loss, state_data_list_[i].pose);
             if (out_id) *out_id = id;
             return true;
         }
+    }
+    if (Debug::on(2)) {
+        Debug::print(2, "GNSS_SKIP",
+                     "chain=" + name_ +
+                     " meas_t=" + std::to_string(gnss.time) +
+                     " no keyframe within 1ms");
     }
     return false;
 }
@@ -286,10 +300,13 @@ void ImuChain::addBiasFactorTo(ceres::Problem& problem, size_t idx) {
     problem.AddResidualBlock(factor, nullptr, state_data_list_[idx].mix);
 }
 
-void ImuChain::writeResult(double time, const Vector3d& origin) {
+void ImuChain::writeResult(double time, const Vector3d& origin, size_t state_idx) {
      if (!is_enabled_ || !nav_saver_.isOpen()) return;
 
-    const auto& state = state_list_[preintegrators_.size()];
+    if (state_idx == std::numeric_limits<size_t>::max()) state_idx = preintegrators_.size();
+    if (state_idx >= state_list_.size()) return;
+
+    const auto& state = state_list_[state_idx];
     vector<double> result;
     Vector3d pos = Earth::local2global(origin, state.p);
     pos.segment(0, 2) *= R2D;

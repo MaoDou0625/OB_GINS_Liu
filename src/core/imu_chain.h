@@ -15,6 +15,7 @@
 #include <deque>
 #include <memory>
 #include <string>
+#include <limits>
 #include <vector>
 
 // Forward declaration
@@ -64,7 +65,7 @@ public:
     void slideWindow(const std::deque<double>& time_list, const std::deque<GNSS>& gnss_list);
 
     // Writes the latest navigation result to file.
-    void writeResult(double time, const Vector3d& origin);
+    void writeResult(double time, const Vector3d& origin, size_t state_idx = std::numeric_limits<size_t>::max());
 
     // Creates and adds a new preintegrator for the next segment.
     void startNewPreintegration();

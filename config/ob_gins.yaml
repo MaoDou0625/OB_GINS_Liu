@@ -6,16 +6,16 @@ run_mode:
   share_factors: false
 # 数据文件
 # Data files
-gnssfile: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Ground Truth/GINS_all.pos"
-outputpath: "D:/Code/dataset/wheel-ins2_dataset/converted/out/C1-Multi-Test"
+gnssfile: "D:/Code/OB_ReConstruct/dataset/wheel-ins2_dataset/converted/C1/Ground Truth/GINS_all_trimmed.pos"
+outputpath: "D:/Code/OB_ReConstruct/dataset/wheel-ins2_dataset/converted/out/C1-Multi-Test"
 save_multi_imu: true
 
 # multi-IMU independent configs (main/left/right)
 imu_main:
   type: "standard"
-  file: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Body-IMU/C1_imu_increments.txt"
-  #file: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Wheel-IMU-Left/C1_imu_increments.txt"
-  #file: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Wheel-IMU-Right/C1_imu_increments.txt"
+  file: "D:/Code/OB_ReConstruct/dataset/wheel-ins2_dataset/converted/C1/Body-IMU/C1_imu_increments.txt"
+  #file: "D:/Code/OB_ReConstruct/dataset/wheel-ins2_dataset/converted/C1/Wheel-IMU-Left/C1_imu_increments.txt"
+  #file: "D:/Code/OB_ReConstruct/dataset/wheel-ins2_dataset/converted/C1/Wheel-IMU-Right/C1_imu_increments.txt"
   columns: 7
   rate_hz: 200
   init_yaw: -93.43   # from 0701Triple112.yaml IMU_up
@@ -31,8 +31,8 @@ imu_main:
 
 imu_wheel_left:
   type: "wheel"
-  #file: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Wheel-IMU-Left/C1_imu_increments.txt"
-  file: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Wheel-IMU-Right/C1_imu_increments.txt"
+  #file: "D:/Code/OB_ReConstruct/dataset/wheel-ins2_dataset/converted/C1/Wheel-IMU-Left/C1_imu_increments.txt"
+  file: "D:/Code/OB_ReConstruct/dataset/wheel-ins2_dataset/converted/C1/Wheel-IMU-Right/C1_imu_increments.txt"
   
   columns: 9
   rate_hz: 200
@@ -51,8 +51,8 @@ imu_wheel_left:
 
 imu_wheel_right:
   type: "wheel"
-  #file: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Wheel-IMU-Right/C1_imu_increments.txt"
-  file: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Wheel-IMU-Left/C1_imu_increments.txt"
+  #file: "D:/Code/OB_ReConstruct/dataset/wheel-ins2_dataset/converted/C1/Wheel-IMU-Right/C1_imu_increments.txt"
+  file: "D:/Code/OB_ReConstruct/dataset/wheel-ins2_dataset/converted/C1/Wheel-IMU-Left/C1_imu_increments.txt"
   columns: 9
   rate_hz: 200
   init_yaw: -3.43    # from 0701Triple112.yaml IMU_right
@@ -139,3 +139,10 @@ debug:
   enable: true        # 总开关，true 时打印调试信息
   level: 1              # 调试级别：1=概要 2=详细 3=更详细
   #dual_chain: false    # 在轮式IMU数据上并行运行主IMU链做对比
+
+# Comparison script settings
+comparison:
+  enable: true
+  python_script: "D:/Code/tools/compare_nav_truth_multi.py"
+  truth_file: "D:/Code/OB_ReConstruct/dataset/wheel-ins2_dataset/converted/C1/Ground Truth/truth_200hz.nav"
+  label: "OB_GINS"
