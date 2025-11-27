@@ -90,6 +90,9 @@ ImuChain::ImuChain(std::string name, const YAML::Node& chain_node, const YAML::N
     try { auto v = global_config["initvel"].as<std::vector<double>>(); if (v.size() >= 3) initial_vel_ = Vector3d(v.data()); } catch (...) {}
     try { auto v = global_config["initgb"].as<std::vector<double>>(); if (v.size() >= 3) initial_bg_ = Vector3d(v.data()) * D2R / 3600.0; } catch (...) {}
     try { auto v = global_config["initab"].as<std::vector<double>>(); if (v.size() >= 3) initial_ba_ = Vector3d(v.data()) * 1.0e-5; } catch (...) {}
+    if (global_config["aligntime"]) {
+        alignment_time_ = global_config["aligntime"].as<double>();
+    }
 
     // --- IMU Noise Parameters ---
     YAML::Node imunoise_node = chain_node["imunoise"] ? chain_node["imunoise"] : global_config["imunoise"];
@@ -151,16 +154,59 @@ ImuChain::ImuChain(std::string name, const YAML::Node& chain_node, const YAML::N
     LOG(INFO) << "[Chain] Initialized chain '" << name_ << "' with type '" << type_ << "': enabled=" << is_enabled_;
 }
 
-void ImuChain::alignToTime(double start_time) {
+void ImuChain::alignAndSync(double start_time, double latitude) {
     if (!is_enabled_) return;
+
+    // First, advance the stream to the specified start_time
     do {
         imu_pre_ = imu_cur_;
         imu_cur_ = loader_->next();
     } while (imu_cur_.time < start_time && !loader_->isEof());
+
+    // If aligntime is configured, perform static alignment using data from this point
+    if (alignment_time_ > 0.0) {
+        DBG_LOG(1, "ALIGN_START", "chain=" << name_ << " at t=" << start_time << " for " << alignment_time_ << "s");
+        Vector3d accumulated_gyro = Vector3d::Zero();
+        Vector3d accumulated_accel = Vector3d::Zero();
+        int imu_count = 0;
+        
+        double align_end_time = start_time + alignment_time_;
+
+        while (imu_cur_.time < align_end_time && !loader_->isEof()) {
+            if (imu_cur_.dt > 1e-9) { // Avoid division by zero
+                accumulated_gyro += imu_cur_.dtheta / imu_cur_.dt;
+                accumulated_accel += imu_cur_.dvel / imu_cur_.dt;
+                imu_count++;
+            }
+            imu_pre_ = imu_cur_;
+            imu_cur_ = loader_->next();
+        }
+
+        if (imu_count > 0) {
+            Vector3d avg_gyro = accumulated_gyro / imu_count;
+            Vector3d avg_accel = accumulated_accel / imu_count;
+
+            // Dual-vector alignment
+            double roll = atan2(-avg_accel.y(), -avg_accel.z());
+            double pitch = atan2(avg_accel.x(), sqrt(avg_accel.y() * avg_accel.y() + avg_accel.z() * avg_accel.z()));
+
+            Matrix3d C_b_n_rp = Rotation::euler2matrix(Vector3d(roll, pitch, 0));
+            Vector3d w_l = C_b_n_rp * avg_gyro;
+            
+            double yaw = atan2(-w_l.y(), w_l.x());
+
+            initial_attitude_ << roll, pitch, yaw;
+            DBG_LOG(1, "ALIGN_RESULT", "chain=" << name_ << " RPY(deg)=" << (initial_attitude_ * R2D).transpose());
+        } else {
+            LOG(WARNING) << "[Chain] No IMU data available for alignment on chain '" << name_ << "'. Using configured attitude.";
+        }
+    }
 }
 
 bool ImuChain::initializeFirstState(const GNSS& initial_gnss, const Vector3d& station_origin) {
     if (!is_enabled_) return false;
+
+    DBG_LOG(1, "INIT_ATT", "chain=" << name_ << " using RPY(deg)=" << (initial_attitude_ * R2D).transpose());
 
     parameters_->station = station_origin;
     parameters_->gravity = Earth::gravity(station_origin);

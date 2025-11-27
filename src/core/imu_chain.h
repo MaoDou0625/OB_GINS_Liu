@@ -36,8 +36,8 @@ public:
     // Initializes the first state of the chain using the first GNSS measurement.
     bool initializeFirstState(const GNSS& initial_gnss, const Vector3d& station_origin);
 
-    // Aligns the IMU data stream to a given start time.
-    void alignToTime(double start_time);
+    // Aligns the IMU data stream to a given start time, optionally performing static alignment.
+    void alignAndSync(double start_time, double latitude);
 
     // Processes IMU data up to a specified time boundary, including interpolation.
     void processImuUpTo(double time_boundary);
@@ -110,6 +110,7 @@ public:
     Vector3d initial_vel_{Vector3d::Zero()};
     Vector3d initial_bg_{Vector3d::Zero()};
     Vector3d initial_ba_{Vector3d::Zero()};
+    double alignment_time_{0.0};
 
     // Data I/O
     std::unique_ptr<ImuFileLoader> loader_;

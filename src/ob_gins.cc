@@ -47,7 +47,7 @@
 #include <limits>
 
 #define INTEGRATION_LENGTH 1.0
-#define MINIMUM_INTERVAL 0.001
+#define MINIMUM_INTERVAL 0.003
 
 // YAML helper: tolerant boolean parsing
 static bool yamlToBool(const YAML::Node &node, bool def = false) {
@@ -160,54 +160,79 @@ int main(int argc, char *argv[]) {
         return -1;
     }
 
-    // Align each chain to start time
-    for (auto &chain : chains) chain->alignToTime(starttime);
+    // --- Initial Time and GNSS Setup ---
 
-    // Initial GNSS: choose the closest epoch *not later* than the navigation start time.
-    // If no such epoch exists, fall back to the very first record.
+    // Determine alignment and navigation start times
+    double alignment_starttime = config["starttime"].as<double>();
+    double alignment_time = 0.0;
+    if (config["aligntime"]) {
+        alignment_time = config["aligntime"].as<double>();
+    }
+    double navigation_starttime = alignment_starttime;
+    if (alignment_time > 0.0) {
+        navigation_starttime += alignment_time;
+    }
+
+    // Find GNSS measurements for alignment and navigation start times in a single pass.
     GNSS gnss = gnssfile.next();
-    GNSS best_gnss = gnss;
+    GNSS align_gnss = gnss;
+    GNSS nav_gnss = gnss;
     GNSS next_gnss{};
     bool has_next_after_start = false;
-    while (!gnssfile.isEof()) {
-        GNSS cur = gnssfile.next();
-        if (cur.time <= starttime) {
-            best_gnss = cur;  // keep the latest GNSS before starttime
-        } else {
-            next_gnss = cur;  // first GNSS after starttime
-            has_next_after_start = true;
-            break;
-        }
+
+    // Find the last GNSS measurement at or before the alignment start time
+    while (gnss.time <= alignment_starttime && !gnssfile.isEof()) {
+        align_gnss = gnss;
+        gnss = gnssfile.next();
     }
-    Vector3d station_origin = best_gnss.blh;
+    
+    // Perform alignment for each chain, which advances their IMU streams to navigation_starttime
+    for (auto &chain : chains) chain->alignAndSync(alignment_starttime, align_gnss.blh[0]);
+
+    // Now, find the last GNSS measurement at or before the navigation start time,
+    // continuing from where the previous search left off.
+    nav_gnss = align_gnss;
+    while (gnss.time <= navigation_starttime && !gnssfile.isEof()) {
+        nav_gnss = gnss;
+        gnss = gnssfile.next();
+    }
+    
+    // The next GNSS measurement after the navigation start time is now in `gnss`.
+    if (gnss.time > navigation_starttime) {
+        next_gnss = gnss;
+        has_next_after_start = true;
+    }
+
+    Vector3d station_origin = nav_gnss.blh;
 
     if (Debug::on(1)) {
-        Vector3d blh_deg = best_gnss.blh * R2D;
+        Vector3d blh_deg = nav_gnss.blh * R2D;
         Debug::print(1, "INIT_GNSS",
-                     "t=" + std::to_string(best_gnss.time) +
+                     "t=" + std::to_string(nav_gnss.time) +
                      " lat(deg)=" + std::to_string(blh_deg[0]) +
                      " lon(deg)=" + std::to_string(blh_deg[1]) +
-                     " h(m)=" + std::to_string(best_gnss.blh[2]));
+                     " h(m)=" + std::to_string(nav_gnss.blh[2]));
     }
 
-    // Initialize chains
-    for (auto &chain : chains) chain->initializeFirstState(best_gnss, station_origin);
-    best_gnss.blh = Earth::global2local(station_origin, best_gnss.blh);
+    // Initialize chains at the navigation start time
+    for (auto &chain : chains) chain->initializeFirstState(nav_gnss, station_origin);
+    GNSS nav_gnss_local = nav_gnss;
+    nav_gnss_local.blh = Earth::global2local(station_origin, nav_gnss.blh);
 
     // Save initial navigation output at start time
-    for (auto &chain : chains) chain->writeResult(best_gnss.time, station_origin, 0);
+    for (auto &chain : chains) chain->writeResult(nav_gnss.time, station_origin, 0);
 
     std::deque<double> timelist;
     std::deque<GNSS> gnsslist;
-    double sow = round(best_gnss.time);
+    double sow = round(nav_gnss.time);
     if (Debug::on(2)) {
         Debug::print(2, "INIT_TIME",
-                     "best_gnss.t=" + std::to_string(best_gnss.time) +
+                     "nav_gnss.t=" + std::to_string(nav_gnss.time) +
                      " sow(round)=" + std::to_string(sow) +
-                     " diff=" + std::to_string(fabs(best_gnss.time - sow)));
+                     " diff=" + std::to_string(fabs(nav_gnss.time - sow)));
     }
     timelist.push_back(sow);
-    gnsslist.push_back(best_gnss);
+    gnsslist.push_back(nav_gnss_local);
     sow += integration_length;
 
     // GNSS outage params

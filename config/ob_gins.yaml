@@ -6,7 +6,7 @@ run_mode:
   share_factors: false
 # 数据文件
 # Data files
-gnssfile: "D:/Code/OB_ReConstruct/dataset/wheel-ins2_dataset/converted/C1/Ground Truth/GINS_all_trimmed.pos"
+gnssfile: "D:/Code/OB_ReConstruct/dataset/wheel-ins2_dataset/converted/C1/Ground Truth/GINS_all.pos"
 outputpath: "D:/Code/OB_ReConstruct/dataset/wheel-ins2_dataset/converted/out/C1-Multi-Test"
 save_multi_imu: true
 
@@ -75,7 +75,8 @@ imu_wheel_right:
 # Processing time parameters
 windows: 50
 starttime: 132025
-endtime: 132225
+endtime: 134980
+aligntime: 0
 ## 可选：关键帧时间间隔（秒），默认 1.0；设置为 0.05 可约 20 Hz
 kf_interval_sec: 1
 
