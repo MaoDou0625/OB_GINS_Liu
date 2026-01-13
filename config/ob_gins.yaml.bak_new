@@ -1,0 +1,149 @@
+# OB_GINS: Optimization-Based GNSS/INS Integrated Navigation System
+run_mode:
+  imu_main_enable: true
+  wheel_left_enable: true
+  wheel_right_enable: true
+  share_factors: false
+# 数据文件
+# Data files
+gnssfile: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Ground Truth/GINS_all.pos"
+outputpath: "D:/Code/dataset/wheel-ins2_dataset/converted/out/C1-Multi-Test"
+save_multi_imu: true
+
+# multi-IMU independent configs (main/left/right)
+imu_main:
+  type: "standard"
+  file: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Body-IMU/C1_imu_increments.txt"
+  #file: "D:/Code/OB_ReConstruct/dataset/wheel-ins2_dataset/converted/C1/Wheel-IMU-Left/C1_imu_increments.txt"
+  #file: "D:/Code/OB_ReConstruct/dataset/wheel-ins2_dataset/converted/C1/Wheel-IMU-Right/C1_imu_increments.txt"
+  columns: 7
+  rate_hz: 200
+  init_yaw: -93.43   # from 0701Triple112.yaml IMU_up
+  antlever: [ 0.0, 0.1, -0.247 ]   # GNSSLA of IMU_up (IMU->GNSS), m
+  imunoise:
+    arw: 1.2
+    vrw: 6
+    gbstd: 50
+    abstd: 2000
+    gsstd: 50
+    asstd: 500
+    corrtime: 1.0
+
+imu_wheel_left:
+  type: "wheel"
+  file: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Wheel-IMU-Left/C1_imu_increments.txt"
+  #file: "D:/Code/OB_ReConstruct/dataset/wheel-ins2_dataset/converted/C1/Wheel-IMU-Right/C1_imu_increments.txt"
+  
+  columns: 9
+  rate_hz: 200
+  init_yaw: -3.43    # from 0701Triple112.yaml IMU_left
+  antlever: [ 0.4, -0.047, -0.5 ]   # GNSSLA of IMU_left, m
+  odolever: [ -0.015, 0.005, 0.005 ]   # WheelLA of IMU_left, m
+  bodyangle: [ 0, 0, 0 ]  # tuned by yaw sweep
+  imunoise:
+    arw: 1.2
+    vrw: 6
+    gbstd: 50
+    abstd: 2000
+    gsstd: 50
+    asstd: 500
+    corrtime: 1.0
+
+imu_wheel_right:
+  type: "wheel"
+  file: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Wheel-IMU-Right/C1_imu_increments.txt"
+  #file: "D:/Code/OB_ReConstruct/dataset/wheel-ins2_dataset/converted/C1/Wheel-IMU-Left/C1_imu_increments.txt"
+  columns: 9
+  rate_hz: 200
+  init_yaw: -3.43    # from 0701Triple112.yaml IMU_right
+  antlever: [ 0.0, -0.047, -0.5 ]   # GNSSLA of IMU_right, m
+  odolever: [ 0.015, -0.005, -0.005 ]   # WheelLA of IMU_right, m
+  bodyangle: [ 0, 0, 0 ]  # tuned by yaw sweep
+  imunoise:
+    arw: 1.2
+    vrw: 6
+    gbstd: 50
+    abstd: 2000
+    gsstd: 50
+    asstd: 500
+    corrtime: 1.0
+
+
+
+
+# 时间信息, s
+# Processing time parameters
+windows: 50
+starttime: 132025
+endtime: 134980
+aligntime: 0
+## 可选：关键帧时间间隔（秒），默认 1.0；设置为 0.05 可约 20 Hz
+kf_interval_sec: 1
+
+# 迭代次数
+# number of iterations
+num_iterations: 20
+
+# 进行GNSS粗差检测
+# Do GNSS outlier culling
+is_outlier_culling: false
+
+# 初始化信息
+# Initialization parameters
+initvel: [ 0, 0, 0 ]   # 北东地速度 (NED velocity), m/s
+initatt: [ 0, 0, 0 ] # 横滚俯仰航向 (RPY attitude), deg
+
+# IMU初始误差
+# IMU constant biases
+initgb: [ 0, 0, 0 ]  # 初始陀螺零偏 (gyroscope biases), deg/hr
+initab: [ 0, 0, 0 ]  # 初始加表零偏 (accelerometer biases), mGal
+
+# IMU文件数据列数 (7, 8 or 9 with odo)
+# IMU data file columns
+imudatalen: 9
+# IMU原始数据频率, Hz
+# IMU data rate
+imudatarate: 200
+
+# 考虑地球自转补偿项
+# consider the Earth's rotation
+isearth: true
+
+# 安装参数
+# Installation parameters
+antlever: [ 0, 0, 0 ]  # 天线杆臂 (antenna lever), IMU前右下方向, m
+odolever: [ 0, 0, 0 ]  # 里程计杆臂 (odometer lever), IMU前右下方向, m
+bodyangle: [ 0, 0, 0 ] # IMU到载体的旋转角 (mouting angles to construct C_b^v), deg
+
+odometer:
+    isuseodo: false             # use odometer
+    std: [ 0.05, 0.05, 0.05 ]   # 里程标准差 (vehicle velocity standard deviation), m/s
+    srw: 100                    # 比例因子误差 (odometer scale-factor standard deviation), PPM
+
+# GNSS仿真中断配置
+# GNSS outage parameters
+isuseoutage: false
+outagetime: 0
+outagelen: 60
+outageperiod: 180
+
+# 固定阈值GNSS抗差 (m), 需要根据数据的实际情况调整
+# a fixed threshold for GNSS outlier-culling using positioning standard deviation
+# must be set according to your own dataset
+gnssthreshold: 20.0
+
+
+
+
+# 调试开关（可选）
+debug:
+  enable: true        # 总开关，true 时打印调试信息
+  level: 1              # 调试级别：1=概要 2=详细 3=更详细
+  #dual_chain: false    # 在轮式IMU数据上并行运行主IMU链做对比
+
+# Comparison script settings
+comparison:
+  enable: true
+  python_script: "D:/Code/tools/compare_nav_truth_multi.py"
+  truth_file: "D:/Code/dataset/wheel-ins2_dataset/converted/C1/Ground Truth/truth_200hz.nav"
+  label: "OB_GINS"

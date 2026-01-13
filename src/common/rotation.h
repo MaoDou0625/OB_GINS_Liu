@@ -80,7 +80,7 @@ public:
         return axisd.angle() * axisd.axis();
     }
 
-    // RPY --> C_b^n, ZYX顺序
+    // RPY --> C_n^b, ZYX顺序
     static Matrix3d euler2matrix(const Vector3d &euler) {
         return Matrix3d(Eigen::AngleAxisd(euler[2], Vector3d::UnitZ()) *
                         Eigen::AngleAxisd(euler[1], Vector3d::UnitY()) *

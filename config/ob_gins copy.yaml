@@ -1,0 +1,155 @@
+# OB_GINS: Optimization-Based GNSS/INS Integrated Navigation System
+
+# Data files
+gnssfile: "D:/Code/dataset/WID/Datasets/transformedData2/four_wheel_dataset_PassengerCar/trial01/GNSS.txt" # Check filename
+outputpath: "D:/Code/dataset/WID/Datasets/transformedData2/output"
+save_multi_imu: true
+
+# Multi-IMU configurations
+
+# # Main Body IMU
+# imu_main:
+#   type: "standard"
+#   file: "D:/Code/dataset/WID/Datasets/transformedData2/four_wheel_dataset_PassengerCar/trial01/Body_IMU.txt"
+#   columns: 7
+#   rate_hz: 120
+#   init_yaw: 0.0
+#   antlever: [ 0.0, 0.0, 0.0 ]
+#   imunoise:
+#     arw: 1.2
+#     vrw: 6
+#     gbstd: 50
+#     abstd: 2000
+#     gsstd: 50
+#     asstd: 500
+#     corrtime: 1.0
+
+# Wheel IMUs
+center_imu1:
+  type: "wheel"
+  file: "D:/Code/dataset/WID/Datasets/transformedData2/four_wheel_dataset_PassengerCar/trial01/center_imu1.txt"
+  columns: 9
+  rate_hz: 120
+  init_yaw: 0.0
+  antlever: [ 2.32, 0.7180, 1.4]
+  odolever: [ -91.2858429	-81.44834137	-168.2511902]
+  bodyangle: [ 0, 0, 0 ]
+  imunoise:
+    arw: 1.2
+    vrw: 6
+    gbstd: 50
+    abstd: 2000
+    gsstd: 50
+    asstd: 500
+    corrtime: 1.0
+
+# center_imu2:
+#   type: "wheel"
+#   file: "D:/Code/dataset/WID/Datasets/transformedData2/four_wheel_dataset_PassengerCar/trial01/center_imu2.txt"
+#   columns: 9
+#   rate_hz: 120
+#   init_yaw: 0.0
+#   antlever: [ 0.0, 0.0, 0.0 ]
+#   odolever: [ 0.0, 0.0, 0.0 ]
+#   bodyangle: [ 0, 0, 0 ]
+#   imunoise:
+#     arw: 1.2
+#     vrw: 6
+#     gbstd: 50
+#     abstd: 2000
+#     gsstd: 50
+#     asstd: 500
+#     corrtime: 1.0
+
+# center_imu3:
+#   type: "wheel"
+#   file: "D:/Code/dataset/WID/Datasets/transformedData2/four_wheel_dataset_PassengerCar/trial01/center_imu3.txt"
+#   columns: 9
+#   rate_hz: 120
+#   init_yaw: 0.0
+#   antlever: [ 0.0, 0.0, 0.0 ]
+#   odolever: [ 0.0, 0.0, 0.0 ]
+#   bodyangle: [ 0, 0, 0 ]
+#   imunoise:
+#     arw: 1.2
+#     vrw: 6
+#     gbstd: 50
+#     abstd: 2000
+#     gsstd: 50
+#     asstd: 500
+#     corrtime: 1.0
+
+# center_imu4:
+#   type: "wheel"
+#   file: "D:/Code/dataset/WID/Datasets/transformedData2/four_wheel_dataset_PassengerCar/trial01/center_imu4.txt"
+#   columns: 9
+#   rate_hz: 120
+#   init_yaw: 0.0
+#   antlever: [ 0.0, 0.0, 0.0 ]
+#   odolever: [ 0.0, 0.0, 0.0 ]
+#   bodyangle: [ 0, 0, 0 ]
+#   imunoise:
+#     arw: 1.2
+#     vrw: 6
+#     gbstd: 50
+#     abstd: 2000
+#     gsstd: 50
+#     asstd: 500
+#     corrtime: 1.0
+
+# Processing time parameters
+windows: 50
+starttime: 30
+endtime: 120
+aligntime: 0
+kf_interval_sec: 1
+
+# Iterations
+num_iterations: 20
+
+# GNSS outlier culling
+is_outlier_culling: false
+
+# Initialization parameters
+initvel: [ 0, 0, 0 ]
+initatt: [ 0, 0, 0 ]
+
+# IMU constant biases
+initgb: [ 0, 0, 0 ]
+initab: [ 0, 0, 0 ]
+
+# Global settings (defaults)
+imudatalen: 7
+imudatarate: 120
+isearth: true
+
+# Installation parameters (defaults)
+antlever: [ 0, 0, 0 ]
+odolever: [ 0, 0, 0 ]
+bodyangle: [ 0, 0, 0 ]
+
+odometer:
+    isuseodo: false
+    std: [ 0.05, 0.05, 0.05 ]
+    srw: 100
+
+# GNSS outage parameters
+isuseoutage: false
+outagetime: 0
+outagelen: 10
+outageperiod: 160
+
+# GNSS threshold
+gnssthreshold: 20.0
+
+# Debug
+debug:
+  enable: true
+  level: 1
+
+# Comparison script settings (disabled/placeholder)
+comparison:
+  enable: false
+  python_script: "D:/Code/tools/compare_nav_truth_multi.py"
+  truth_file: "D:/Code/dataset/WID/Datasets/transformedData2/four_wheel_dataset_PassengerCar/trial01/truth.nav"
+  label: "OB_GINS"

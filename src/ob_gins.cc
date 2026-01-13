@@ -116,6 +116,8 @@ int main(int argc, char *argv[]) {
     Debug::set(dbg_enable, dbg_level);
 
     // Run mode
+    // Dynamic IMU chain loading replaces explicit run_mode checks
+    /*
     bool use_main = false, use_wheel_left = false, use_wheel_right = false;
     if (config["run_mode"]) {
         auto rm = config["run_mode"];
@@ -123,6 +125,7 @@ int main(int argc, char *argv[]) {
         use_wheel_left  = yamlToBool(rm["wheel_left_enable"], use_wheel_left);
         use_wheel_right = yamlToBool(rm["wheel_right_enable"], use_wheel_right);
     }
+    */
 
     // IO paths
     std::string gnsspath   = config["gnssfile"].as<std::string>();
@@ -146,6 +149,28 @@ int main(int argc, char *argv[]) {
 
     // Construct IMU chains
     std::vector<std::unique_ptr<ImuChain>> chains;
+    
+    // Dynamically load IMU chains from config
+    for (YAML::const_iterator it = config.begin(); it != config.end(); ++it) {
+        std::string name = it->first.as<std::string>();
+        YAML::Node node = it->second;
+
+        // Check if node is a map and has a "type" field
+        if (node.Type() == YAML::NodeType::Map && node["type"]) {
+            std::string type = node["type"].as<std::string>();
+            
+            // Normalize type string if needed, currently strictly checking
+            if (type == "standard" || type == "wheel") {
+                auto chain = std::make_unique<ImuChain>(name, node, config);
+                if (chain->isEnabled()) {
+                    chains.emplace_back(std::move(chain));
+                    std::cout << "[info] Added IMU chain: " << name << " (type: " << type << ")" << std::endl;
+                }
+            }
+        }
+    }
+
+    /*
     auto add_chain = [&](const std::string &name, const YAML::Node &node) {
         if (!node) return;
         auto chain = std::make_unique<ImuChain>(name, node, config);
@@ -154,6 +179,7 @@ int main(int argc, char *argv[]) {
     if (use_main && config["imu_main"])       add_chain("main",       config["imu_main"]);
     if (use_wheel_left && config["imu_wheel_left"])  add_chain("wheel_left",  config["imu_wheel_left"]);
     if (use_wheel_right && config["imu_wheel_right"]) add_chain("wheel_right", config["imu_wheel_right"]);
+    */
 
     if (chains.empty()) {
         std::cout << "No IMU chain enabled" << std::endl;
@@ -187,7 +213,7 @@ int main(int argc, char *argv[]) {
     }
     
     // Perform alignment for each chain, which advances their IMU streams to navigation_starttime
-    for (auto &chain : chains) chain->alignAndSync(alignment_starttime, align_gnss.blh[0]);
+    for (auto &chain : chains) chain->alignAndSync(alignment_starttime, align_gnss.blh);
 
     // Now, find the last GNSS measurement at or before the navigation start time,
     // continuing from where the previous search left off.
@@ -224,12 +250,11 @@ int main(int argc, char *argv[]) {
 
     std::deque<double> timelist;
     std::deque<GNSS> gnsslist;
-    double sow = round(nav_gnss.time);
+    double sow = nav_gnss.time;
     if (Debug::on(2)) {
         Debug::print(2, "INIT_TIME",
                      "nav_gnss.t=" + std::to_string(nav_gnss.time) +
-                     " sow(round)=" + std::to_string(sow) +
-                     " diff=" + std::to_string(fabs(nav_gnss.time - sow)));
+                     " sow=" + std::to_string(sow));
     }
     timelist.push_back(sow);
     gnsslist.push_back(nav_gnss_local);
@@ -446,7 +471,26 @@ int main(int argc, char *argv[]) {
         // Start next preintegration
         for (auto &chain : chains) chain->startNewPreintegration();
 
-        sow += integration_length;
+        // sow += integration_length;
+        // Adaptive time stepping: find the next GNSS measurement closest to (sow + integration_length)
+        if (!gnssfile.isEof()) {
+            double next_target = sow + integration_length;
+            
+            // Advance GNSS stream until we are close to the target time
+            // Stop if we pass the target time or if we are within a small tolerance window
+            while (gnss.time < next_target - 0.5 * integration_length && !gnssfile.isEof()) {
+                gnss = gnssfile.next();
+            }
+
+            // Now gnss is a candidate. If it matches the target time well enough, snap to it.
+            if (!gnssfile.isEof() && fabs(gnss.time - next_target) < 0.5 * integration_length) {
+                sow = gnss.time;
+            } else {
+                sow = next_target;
+            }
+        } else {
+            sow += integration_length;
+        }
     }
 
     gnssfile.close();

@@ -64,11 +64,17 @@ ImuChain::ImuChain(std::string name, const YAML::Node& chain_node, const YAML::N
     // Initial attitude
     Vector3d global_initatt = readVec3(global_config, "initatt", Vector3d::Zero()) * D2R;
     initial_attitude_ = global_initatt;
+    
+    // Check if global config provided specific yaw/attitude
+    if (global_config["initatt"] || global_config["init_yaw"]) has_user_yaw_ = true;
+
     if (chain_node["initatt"]) {
         initial_attitude_ = readVec3(chain_node, "initatt", global_initatt);
         initial_attitude_ *= D2R;
+        has_user_yaw_ = true;
     } else if (chain_node["init_yaw"]) {
         initial_attitude_ = Vector3d(0, 0, chain_node["init_yaw"].as<double>() * D2R);
+        has_user_yaw_ = true;
     }
     
     // Lever arms and body angle
@@ -154,7 +160,7 @@ ImuChain::ImuChain(std::string name, const YAML::Node& chain_node, const YAML::N
     LOG(INFO) << "[Chain] Initialized chain '" << name_ << "' with type '" << type_ << "': enabled=" << is_enabled_;
 }
 
-void ImuChain::alignAndSync(double start_time, double latitude) {
+void ImuChain::alignAndSync(double start_time, const Vector3d& blh) {
     if (!is_enabled_) return;
 
     // First, advance the stream to the specified start_time
@@ -194,9 +200,41 @@ void ImuChain::alignAndSync(double start_time, double latitude) {
             Vector3d w_l = C_b_n_rp * avg_gyro;
             
             double yaw = atan2(-w_l.y(), w_l.x());
+            double calculated_yaw = yaw;
+
+            if (has_user_yaw_) {
+                yaw = initial_attitude_.z();
+                LOG(INFO) << "[Chain] " << name_ << " alignment finished. Using configured Yaw: " << yaw * R2D << " deg (Calculated: " << calculated_yaw * R2D << " deg)";
+            } else {
+                 LOG(INFO) << "[Chain] " << name_ << " alignment finished. Using calculated Yaw: " << yaw * R2D << " deg";
+            }
 
             initial_attitude_ << roll, pitch, yaw;
-            DBG_LOG(1, "ALIGN_RESULT", "chain=" << name_ << " RPY(deg)=" << (initial_attitude_ * R2D).transpose());
+            
+            // Debug Output Level 1
+            if (Debug::on(1)) {
+                Vector3d att_deg = initial_attitude_ * R2D;
+                // Approximate ideal outputs for verification
+                double g = Earth::gravity(blh); 
+                Matrix3d C_n_b = Rotation::euler2matrix(initial_attitude_).transpose();
+                // Ideal Accel (Gravity in Nav is [0,0,g], so specific force in Body is C_n^b * [0,0,-g])
+                Vector3d f_b_ideal = C_n_b * Vector3d(0, 0, -g);
+                
+                // Ideal Gyro (Earth rotation)
+                Vector3d w_ie_n = Earth::iewn(blh[0]);
+                Vector3d w_b_ideal = C_n_b * w_ie_n;
+                
+                std::stringstream ss;
+                ss << "\n[ALIGN_INFO] Chain: " << name_ << "\n";
+                ss << "  Attitude (Deg): R=" << att_deg[0] << " P=" << att_deg[1] << " Y=" << att_deg[2] << "\n";
+                ss << "  Rotation Matrix (Body->Nav):\n" << C_n_b.transpose() << "\n";
+                ss << "  Avg Accel (m/s^2): " << avg_accel.transpose() << "\n";
+                ss << "  Avg Gyro (rad/s):  " << avg_gyro.transpose() << "\n";
+                ss << "  Ideal Accel:       " << f_b_ideal.transpose() << "\n";
+                ss << "  Ideal Gyro:        " << w_b_ideal.transpose() << "\n";
+                Debug::print(1, "ALIGN", ss.str());
+            }
+
         } else {
             LOG(WARNING) << "[Chain] No IMU data available for alignment on chain '" << name_ << "'. Using configured attitude.";
         }
