@@ -343,6 +343,10 @@ void ImuChain::addParameterBlocksTo(ceres::Problem& problem, size_t max_idx) {
 void ImuChain::addImuFactorsTo(ceres::Problem& problem, size_t max_idx) {
     if (!is_enabled_) return;
     for (size_t k = 0; k < max_idx; k++) {
+        if (Debug::on(3)) {
+            Debug::print(3, "ADD_IMU_FACTOR",
+                         "chain=" + name_ + " idx=" + std::to_string(k) + " " + preintegrators_[k]->getDebugString());
+        }
         auto factor = preintegrators_[k]->createImuFactor();
         problem.AddResidualBlock(factor, nullptr, 
                                  state_data_list_[k].pose, state_data_list_[k].mix,
@@ -363,6 +367,14 @@ bool ImuChain::addGnssFactorTo(ceres::Problem& problem, const GNSS& gnss, ceres:
                              " key_t=" + std::to_string(time_list[i]) +
                              " diff=" + std::to_string(fabs(gnss.time - time_list[i])));
             }
+            if (Debug::on(3)) {
+                Vector3d blh_deg = gnss.blh;
+                blh_deg.segment(0, 2) *= R2D;
+                Debug::print(3, "ADD_GNSS_FACTOR",
+                             "chain=" + name_ + " t=" + std::to_string(gnss.time) + 
+                             " pos(deg/m)=" + std::to_string(blh_deg[0]) + "," + std::to_string(blh_deg[1]) + "," + std::to_string(blh_deg[2]) + 
+                             " std=" + std::to_string(gnss.std[0]));
+            }
             auto factor = new GnssFactor(gnss, antlever_);
             auto id = problem.AddResidualBlock(factor, loss, state_data_list_[i].pose);
             if (out_id) *out_id = id;
@@ -380,6 +392,9 @@ bool ImuChain::addGnssFactorTo(ceres::Problem& problem, const GNSS& gnss, ceres:
 
 void ImuChain::addBiasFactorTo(ceres::Problem& problem, size_t idx) {
     if (!is_enabled_) return;
+    if (Debug::on(3)) {
+        Debug::print(3, "ADD_BIAS_FACTOR", "chain=" + name_ + " idx=" + std::to_string(idx));
+    }
     auto factor = preintegrators_[idx-1]->createImuErrorFactor();
     problem.AddResidualBlock(factor, nullptr, state_data_list_[idx].mix);
 }
@@ -431,6 +446,9 @@ void ImuChain::slideWindow(const std::deque<double>& time_list, const std::deque
 void ImuChain::addFactorsToMarginalizationInfo(std::shared_ptr<MarginalizationInfo>& marginalization_info, const GNSS& gnss) {
     if (!is_enabled_) return;
 
+    if (Debug::on(3)) {
+        Debug::print(3, "ADD_MARGIN_FACTOR", "chain=" + name_ + " imu_preint=" + preintegrators_[0]->getDebugString());
+    }
     auto factor   = std::shared_ptr<ceres::CostFunction>(preintegrators_[0]->createImuFactor());
     auto residual = std::make_shared<ResidualBlockInfo>(
         factor, nullptr,
@@ -440,6 +458,9 @@ void ImuChain::addFactorsToMarginalizationInfo(std::shared_ptr<MarginalizationIn
     marginalization_info->addResidualBlockInfo(residual);
     
     if (fabs(gnss.time - state_list_[0].time) < 0.001) {
+        if (Debug::on(3)) {
+            Debug::print(3, "ADD_MARGIN_GNSS", "chain=" + name_ + " t=" + std::to_string(gnss.time));
+        }
         auto gnss_factor = std::make_shared<GnssFactor>(gnss, antlever_);
         auto gnss_residual = std::make_shared<ResidualBlockInfo>(gnss_factor, nullptr, std::vector<double *>{state_data_list_[0].pose}, std::vector<int>{});
         marginalization_info->addResidualBlockInfo(gnss_residual);

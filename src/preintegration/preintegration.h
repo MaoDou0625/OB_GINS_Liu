@@ -29,6 +29,9 @@
 #include "preintegration_normal.h"
 #include "preintegration_odo.h"
 
+#include <sstream>
+#include "src/common/angle.h"
+
 class Preintegration {
 
 public:
@@ -160,6 +163,18 @@ public:
 
     int getMixParamSize() const override {
         return Preintegration::numMixParameter(options_);
+    }
+
+    std::string getDebugString() const override {
+        if (!preint_impl_) return "Preint: null";
+        const auto& delta = preint_impl_->deltaState();
+        Vector3d att = Rotation::quaternion2euler(delta.q) * R2D;
+        std::stringstream ss;
+        ss << "dt=" << preint_impl_->deltaTime() 
+           << " dP=[" << delta.p.transpose() << "]"
+           << " dV=[" << delta.v.transpose() << "]"
+           << " dAtt(deg)=[" << att.transpose() << "]";
+        return ss.str();
     }
 
 private:

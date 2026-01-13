@@ -47,6 +47,9 @@ public:
 
     /// Get the size of the mixed (speed/bias/etc.) parameter block.
     virtual int getMixParamSize() const = 0;
+
+    /// Get a string representation of the current preintegration status (delta state) for debugging.
+    virtual std::string getDebugString() const { return ""; }
 };
 
 #endif // OB_GINS_I_UNIFIED_PREINTEGRATOR_H
