@@ -225,12 +225,19 @@ int main(int argc, char *argv[]) {
     }
     
     // The next GNSS measurement after the navigation start time is now in `gnss`.
+    // We need station_origin to convert it, but station_origin is defined later.
+    // So we just store it here and convert it after station_origin is defined.
     if (gnss.time > navigation_starttime) {
         next_gnss = gnss;
         has_next_after_start = true;
     }
 
     Vector3d station_origin = nav_gnss.blh;
+
+    // Now convert next_gnss if it exists
+    if (has_next_after_start) {
+        next_gnss.blh = Earth::global2local(station_origin, next_gnss.blh);
+    }
 
     if (Debug::on(1)) {
         Vector3d blh_deg = nav_gnss.blh * R2D;
