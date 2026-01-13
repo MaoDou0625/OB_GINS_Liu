@@ -40,7 +40,12 @@ public:
         } else if (n >= 7) {
             memcpy(gnss_.std.data(), &data_[4], 3 * sizeof(double));
         } else {
-            gnss_.std.setZero();
+            gnss_.std.setOnes();
+        }
+
+        // Validate std to avoid division by zero in optimization
+        for (int i = 0; i < 3; ++i) {
+            if (gnss_.std[i] < 1e-4) gnss_.std[i] = 1.0;
         }
 
         gnss_.blh[0] *= D2R;
