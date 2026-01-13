@@ -53,4 +53,6 @@ typedef struct Pose {
     Vector3d t;
 } Pose;
 
+constexpr double MINIMUM_INTERVAL = 0.003;
+
 #endif // TYPES_H

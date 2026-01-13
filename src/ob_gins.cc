@@ -46,8 +46,9 @@
 #include <cstdlib>
 #include <limits>
 
+// #define INTEGRATION_LENGTH 1.0
+// MINIMUM_INTERVAL is now defined in types.h
 #define INTEGRATION_LENGTH 1.0
-#define MINIMUM_INTERVAL 0.003
 
 // YAML helper: tolerant boolean parsing
 static bool yamlToBool(const YAML::Node &node, bool def = false) {

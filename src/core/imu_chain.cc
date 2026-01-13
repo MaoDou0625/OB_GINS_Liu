@@ -359,7 +359,7 @@ bool ImuChain::addGnssFactorTo(ceres::Problem& problem, const GNSS& gnss, ceres:
     if (!is_enabled_) return false;
     // Find the time index corresponding to the GNSS measurement
     for (size_t i = 0; i < time_list.size(); ++i) {
-        if (fabs(gnss.time - time_list[i]) < 0.001) {
+        if (fabs(gnss.time - time_list[i]) < MINIMUM_INTERVAL) {
             if (Debug::on(2)) {
                 Debug::print(2, "GNSS_MATCH",
                              "chain=" + name_ +
@@ -385,7 +385,7 @@ bool ImuChain::addGnssFactorTo(ceres::Problem& problem, const GNSS& gnss, ceres:
         Debug::print(2, "GNSS_SKIP",
                      "chain=" + name_ +
                      " meas_t=" + std::to_string(gnss.time) +
-                     " no keyframe within 1ms");
+                     " no keyframe within tolerance");
     }
     return false;
 }
@@ -457,7 +457,7 @@ void ImuChain::addFactorsToMarginalizationInfo(std::shared_ptr<MarginalizationIn
         std::vector<int>{0, 1});
     marginalization_info->addResidualBlockInfo(residual);
     
-    if (fabs(gnss.time - state_list_[0].time) < 0.001) {
+    if (fabs(gnss.time - state_list_[0].time) < MINIMUM_INTERVAL) {
         if (Debug::on(3)) {
             Debug::print(3, "ADD_MARGIN_GNSS", "chain=" + name_ + " t=" + std::to_string(gnss.time));
         }
