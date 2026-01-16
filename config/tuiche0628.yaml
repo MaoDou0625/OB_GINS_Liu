@@ -16,10 +16,10 @@ imu_main:
   rate_hz: 1000
   antlever: [ 0.0, 0.0, 0.0 ]
   imunoise:
-    arw: 0.1 # FOG is higher precision
-    vrw: 0.05
-    gbstd: 0.1
-    abstd: 100
+    arw: 1.2 # MEMS noise
+    vrw: 6
+    gbstd: 50
+    abstd: 2000
     gsstd: 50
     asstd: 500
     corrtime: 1.0
@@ -75,7 +75,7 @@ gnssthreshold: 20.0
 # Debug
 debug:
   enable: true
-  level: 3
+  level: 1
 
 # Comparison script settings
 comparison:

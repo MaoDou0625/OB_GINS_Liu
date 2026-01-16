@@ -1,40 +1,91 @@
 # OB_GINS: Optimization-Based GNSS/INS Integrated Navigation System
 
 # Data files
-# GNSS and Truth both use the aligned RTK file
-gnssfile: "D:/Code/dataset/0628tuiche/transformed/2Dongxi/20250627-222417-~1_rtk.txt"
-outputpath: "D:/Code/dataset/0628tuiche/transformed/output"
+gnssfile: "D:/Code/dataset/WID/Datasets/transformedData2/four_wheel_dataset_PassengerCar/trial01/GNSS_use.txt" # Check filename
+outputpath: "D:/Code/dataset/WID/Datasets/transformedData2/output"
 save_multi_imu: true
 
 # Multi-IMU configurations
 
-# # Main Body IMU (FOG)
-# imu_main:
-#   type: "standard"
-#   file: "D:/Code/dataset/0628tuiche/transformed/2Dongxi/20250627_222419_2_fog_sp.txt"
-#   columns: 7
-#   rate_hz: 1000
-#   antlever: [ 0.0, 0.0, 0.0 ]
-#   imunoise:
-#     arw: 0.1 # FOG is higher precision
-#     vrw: 0.05
-#     gbstd: 0.1
-#     abstd: 100
-#     gsstd: 50
-#     asstd: 500
-#     corrtime: 1.0
-
-# Auxiliary IMU (MEMS)
-center_imu1:
+# Main Body IMU
+imu_main:
   type: "standard"
-  file: "D:/Code/dataset/0628tuiche/transformed/2Dongxi/20250627_222419_4_mems_sp.txt"
+  file: "D:/Code/dataset/WID/Datasets/transformedData2/four_wheel_dataset_PassengerCar/trial01/Body_IMU.txt"
   columns: 7
-  rate_hz: 200
-  antlever: [ 0.0, 0.0, 0.0 ] # Assume co-located or small lever arm for now
+  rate_hz: 120
+  # init_yaw: 145.8396454
+  antlever: [ 0.0, 0.0, 0.0 ]
+  imunoise:
+    arw: 1.2
+    vrw: 6
+    gbstd: 50
+    abstd: 2000
+    gsstd: 50
+    asstd: 500
+    corrtime: 1.0
+
+# Wheel IMUs
+center_imu1:
+  type: "wheel"
+  file: "D:/Code/dataset/WID/Datasets/transformedData2/four_wheel_dataset_PassengerCar/trial01/center_imu1.txt"
+  columns: 9
+  rate_hz: 120
+  antlever: [ 2.32, 0.7180, 1.4]
   odolever: [ 0,0, 0 ]
   bodyangle: [ 0, 0, 0 ]
   imunoise:
-    arw: 1.2 # MEMS noise
+    arw: 1.2
+    vrw: 6
+    gbstd: 50
+    abstd: 2000
+    gsstd: 50
+    asstd: 500
+    corrtime: 1.0
+
+center_imu2:
+  type: "wheel"
+  file: "D:/Code/dataset/WID/Datasets/transformedData2/four_wheel_dataset_PassengerCar/trial01/center_imu2.txt"
+  columns: 9
+  rate_hz: 120
+  antlever: [ -0.29, 0.718, 1.4 ]
+  odolever: [ 0.0, 0.0, 0.0 ]
+  bodyangle: [ 0, 0, 0 ]
+  imunoise:
+    arw: 1.2
+    vrw: 6
+    gbstd: 50
+    abstd: 2000
+    gsstd: 50
+    asstd: 500
+    corrtime: 1.0
+
+center_imu3:
+  type: "wheel"
+  file: "D:/Code/dataset/WID/Datasets/transformedData2/four_wheel_dataset_PassengerCar/trial01/center_imu3.txt"
+  columns: 9
+  rate_hz: 120
+  antlever: [ 2.32, -0.7180, 1.4]
+  odolever: [ 0.0, 0.0, 0.0 ]
+  bodyangle: [ 0, 0, 0 ]
+  imunoise:
+    arw: 1.2
+    vrw: 6
+    gbstd: 50
+    abstd: 2000
+    gsstd: 50
+    asstd: 500
+    corrtime: 1.0
+
+center_imu4:
+  type: "wheel"
+  file: "D:/Code/dataset/WID/Datasets/transformedData2/four_wheel_dataset_PassengerCar/trial01/center_imu4.txt"
+  columns: 9
+  rate_hz: 120
+  antlever: [ -0.29, -0.750, 1.4 ]
+  odolever: [ 0.0, 0.0, 0.0 ]
+  bodyangle: [ 0, 0, 0 ]
+  imunoise:
+    arw: 1.2
     vrw: 6
     gbstd: 50
     abstd: 2000
@@ -44,10 +95,10 @@ center_imu1:
 
 # Processing time parameters
 windows: 50
-starttime: 680
-endtime: 1230
-aligntime: 5
-kf_interval_sec: 0.2
+starttime: 1
+endtime: 120
+aligntime: 3
+kf_interval_sec: 0.1
 
 # Iterations
 num_iterations: 20
@@ -55,8 +106,11 @@ num_iterations: 20
 # GNSS outlier culling
 is_outlier_culling: false
 
-# consider the Earths rotation
+# 考虑地球自转补偿项
+# consider the Earth's rotation
 isearth: true
+
+
 
 odometer:
     isuseodo: false
@@ -75,11 +129,11 @@ gnssthreshold: 20.0
 # Debug
 debug:
   enable: true
-  level: 3
+  level: 1
 
 # Comparison script settings
 comparison:
   enable: true
   python_script: "d:/Code/OB_GINS_Liu/plot_comparison.py"
-  truth_file: "D:/Code/dataset/0628tuiche/transformed/2Dongxi/20250627-222417-~1_rtk.txt"
+  truth_file: "D:/Code/dataset/WID/Datasets/transformedData2/four_wheel_dataset_PassengerCar/trial01/GNSS_use.txt"
   label: "OB_GINS"
