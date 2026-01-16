@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.10)
 project(ob_gins)
-
+# 针对 Windows MSVC 编译器开启 /bigobj 支持
+if(MSVC)
+    add_compile_options(/bigobj)
+endif()
 # Use C++20 to support designated initializers on MSVC
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
