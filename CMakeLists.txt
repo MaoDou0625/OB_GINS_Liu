@@ -113,6 +113,10 @@ target_link_libraries(test_spline_initializer ${YAML_CPP_LIBRARIES} Sophus::Soph
 add_executable(test_short_segment_opt examples/test_short_segment_opt.cpp src/factors/pose_manifold.cc)
 target_link_libraries(test_short_segment_opt ${CERES_LIBRARIES} ${YAML_CPP_LIBRARIES} Sophus::Sophus)
 
+# Test Continuous GNSS Factor
+add_executable(test_continuous_gnss test/test_continuous_gnss.cpp)
+target_link_libraries(test_continuous_gnss ${CERES_LIBRARIES} ${YAML_CPP_LIBRARIES} Sophus::Sophus)
+
 
 
 
