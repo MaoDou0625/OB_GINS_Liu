@@ -101,6 +101,21 @@ target_link_libraries(test_inertial_factor ${CERES_LIBRARIES} ${YAML_CPP_LIBRARI
 add_executable(test_inertial_physics test/test_inertial_physics.cpp src/factors/pose_manifold.cc)
 target_link_libraries(test_inertial_physics ${CERES_LIBRARIES} ${YAML_CPP_LIBRARIES} Sophus::Sophus)
 
+# Test Bias RW
+add_executable(test_bias_rw test/test_bias_rw.cpp)
+target_link_libraries(test_bias_rw ${CERES_LIBRARIES} ${YAML_CPP_LIBRARIES})
+
+# Test Spline Initializer
+add_executable(test_spline_initializer test/test_spline_initializer.cpp)
+target_link_libraries(test_spline_initializer ${YAML_CPP_LIBRARIES} Sophus::Sophus)
+
+# Example: Short Segment Optimization
+add_executable(test_short_segment_opt examples/test_short_segment_opt.cpp src/factors/pose_manifold.cc)
+target_link_libraries(test_short_segment_opt ${CERES_LIBRARIES} ${YAML_CPP_LIBRARIES} Sophus::Sophus)
+
+
+
+
 
 
 
