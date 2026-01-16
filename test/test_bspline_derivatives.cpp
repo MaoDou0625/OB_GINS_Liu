@@ -48,7 +48,7 @@ int main() {
     double u = (t_query - control_points[1].timestamp()) / dt_spline;
 
     // Analytical Evaluation
-    BSplineEvaluator::Result analytical = BSplineEvaluator::Evaluate(
+    BSplineEvaluator::Result<double> analytical = BSplineEvaluator::Evaluate(
         u, dt_spline, 
         control_points[0], control_points[1], control_points[2], control_points[3]
     );

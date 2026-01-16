@@ -85,6 +85,26 @@ target_link_libraries(test_spline_fitting ${CERES_LIBRARIES} ${YAML_CPP_LIBRARIE
 add_executable(test_wheel_physics test/test_wheel_physics.cpp)
 target_link_libraries(test_wheel_physics ${YAML_CPP_LIBRARIES} Sophus::Sophus)
 
+# Test Wheel NHC
+add_executable(test_wheel_nhc test/test_wheel_nhc.cpp src/factors/pose_manifold.cc)
+target_link_libraries(test_wheel_nhc ${CERES_LIBRARIES} ${YAML_CPP_LIBRARIES} Sophus::Sophus)
+
+# Test NHC Observability
+add_executable(test_nhc_observability test/test_nhc_observability.cpp src/factors/pose_manifold.cc)
+target_link_libraries(test_nhc_observability ${CERES_LIBRARIES} ${YAML_CPP_LIBRARIES} Sophus::Sophus)
+
+# Test Inertial Factor
+add_executable(test_inertial_factor test/test_inertial_factor.cpp src/factors/pose_manifold.cc)
+target_link_libraries(test_inertial_factor ${CERES_LIBRARIES} ${YAML_CPP_LIBRARIES} Sophus::Sophus)
+
+# Test Inertial Physics
+add_executable(test_inertial_physics test/test_inertial_physics.cpp src/factors/pose_manifold.cc)
+target_link_libraries(test_inertial_physics ${CERES_LIBRARIES} ${YAML_CPP_LIBRARIES} Sophus::Sophus)
+
+
+
+
+
 
 
 
