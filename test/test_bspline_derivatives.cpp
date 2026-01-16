@@ -1,4 +1,4 @@
-#include <iostream>
+#include <gtest/gtest.h>
 #include <vector>
 #include <random>
 #include <cmath>
@@ -9,88 +9,149 @@
 
 using namespace ob_gins::spline;
 
-// Simple assertion helper
-void assert_near(const std::string& name, const Eigen::Vector3d& val1, const Eigen::Vector3d& val2, double tol = 1e-4) {
-    double err = (val1 - val2).norm();
-    std::cout << std::left << std::setw(20) << name 
-              << " | Error: " << std::setw(12) << err 
-              << (err < tol ? " [PASS]" : " [FAIL]") << std::endl;
+// Helper to convert angular velocity from body to world frame
+Eigen::Vector3d body_to_world_angular_vel(const Sophus::SO3d& R_wb, const Eigen::Vector3d& w_body) {
+    return R_wb * w_body;
+}
+
+// Helper to convert linear acceleration from body to world frame
+Eigen::Vector3d body_to_world_linear_acc(const Sophus::SO3d& R_wb, const Eigen::Vector3d& a_body) {
+    return R_wb * a_body;
+}
+
+TEST(BSplineDerivativesTest, NumericalVerification) {
+    // Random seed for reproducibility
+    std::mt19937 gen(42);
+    std::normal_distribution<double> noise(0.0, 0.05); // Reduced noise for more stable spiral
+
+    // Define the helical spiral parameters
+    double radius = 10.0;
+    double vz = 1.0; // Linear velocity in Z
+    double omega_z = 0.5; // Angular velocity around Z
+    double total_time = 10.0;
+    double dt_cp = 0.1; // Control point interval
+    int num_cps = static_cast<int>(total_time / dt_cp) + 4; // Add 3 for spline order + 1 extra for full trajectory
+
+    std::vector<ControlPoint> control_points;
+
+    // Generate control points for a helical spiral
+    for (int i = 0; i < num_cps; ++i) {
+        double t = i * dt_cp;
+        double x = radius * std::cos(omega_z * t);
+        double y = radius * std::sin(omega_z * t);
+        double z = vz * t;
+
+        // Position
+        Eigen::Vector3d t_vec(x, y, z);
+
+        // Orientation (rotating around Z-axis)
+        Eigen::Quaterniond q_rot_z(Eigen::AngleAxisd(omega_z * t + noise(gen), Eigen::Vector3d::UnitZ()));
+        Eigen::Quaterniond q_pitch(Eigen::AngleAxisd(noise(gen) * 0.1, Eigen::Vector3d::UnitY())); // Small pitch noise
+        Eigen::Quaterniond q_roll(Eigen::AngleAxisd(noise(gen) * 0.1, Eigen::Vector3d::UnitX()));  // Small roll noise
+        
+        Sophus::SE3d pose(q_rot_z * q_pitch * q_roll, t_vec);
+        control_points.emplace_back(t, pose);
+    }
     
-    if (err >= tol) {
-        std::cout << "  Expected: " << val1.transpose() << std::endl;
-        std::cout << "  Actual:   " << val2.transpose() << std::endl;
-        exit(1);
+    // Define dt for BSplineEvaluator (matches control point interval)
+    double dt_eval = dt_cp; 
+    double delta_num_diff = 1e-5; // Small delta for numerical differentiation
+
+    // Loop through the trajectory for verification
+    // Avoid boundaries where spline evaluation might be less accurate or control points fewer
+    for (double current_time = dt_eval * 3; current_time < total_time - dt_eval * 3; current_time += dt_eval * 0.5) {
+        // Find the active segment's first control point index
+        int segment_idx = static_cast<int>(current_time / dt_eval);
+        
+        // Normalize time 'u' within the current segment
+        double u_normalized = (current_time - control_points[segment_idx].timestamp()) / dt_eval;
+
+        // Ensure we have enough control points for the evaluation (spline order 3 needs 4 CPs)
+        if (segment_idx + 3 >= control_points.size()) {
+            std::cerr << "Not enough control points for time " << current_time << std::endl;
+            break;
+        }
+
+        // A. Get Analytical Derivatives
+        auto analytical_res = BSplineEvaluator<double>::Evaluate(
+            u_normalized, dt_eval, 
+            control_points[segment_idx], control_points[segment_idx+1], 
+            control_points[segment_idx+2], control_points[segment_idx+3]
+        );
+
+        // B. Compute Numerical Pose Derivatives (Velocity and Angular Velocity)
+        double u_plus_dt_num = (current_time + delta_num_diff - control_points[segment_idx].timestamp()) / dt_eval;
+        double u_minus_dt_num = (current_time - delta_num_diff - control_points[segment_idx].timestamp()) / dt_eval;
+
+        auto res_plus = BSplineEvaluator<double>::Evaluate(
+            u_plus_dt_num, dt_eval, 
+            control_points[segment_idx], control_points[segment_idx+1], 
+            control_points[segment_idx+2], control_points[segment_idx+3]
+        );
+        auto res_minus = BSplineEvaluator<double>::Evaluate(
+            u_minus_dt_num, dt_eval, 
+            control_points[segment_idx], control_points[segment_idx+1], 
+            control_points[segment_idx+2], control_points[segment_idx+3]
+        );
+        
+        // Numerical Linear Velocity (World Frame)
+        Eigen::Vector3d v_world_num = (res_plus.pose.translation() - res_minus.pose.translation()) / (2 * delta_num_diff);
+        
+        // Numerical Angular Velocity (Body Frame)
+        // w_body ≈ log(R(t-dt)^-1 * R(t+dt)) / (2*dt)
+        Eigen::Vector3d w_body_num = (res_minus.pose.so3().inverse() * res_plus.pose.so3()).log() / (2 * delta_num_diff);
+
+        // C. Assert Velocities
+        EXPECT_NEAR(analytical_res.v_world.x(), v_world_num.x(), 1e-4) << "Time: " << current_time;
+        EXPECT_NEAR(analytical_res.v_world.y(), v_world_num.y(), 1e-4) << "Time: " << current_time;
+        EXPECT_NEAR(analytical_res.v_world.z(), v_world_num.z(), 1e-4) << "Time: " << current_time;
+        
+        EXPECT_NEAR(analytical_res.w_body.x(), w_body_num.x(), 1e-4) << "Time: " << current_time;
+        EXPECT_NEAR(analytical_res.w_body.y(), w_body_num.y(), 1e-4) << "Time: " << current_time;
+        EXPECT_NEAR(analytical_res.w_body.z(), w_body_num.z(), 1e-4) << "Time: " << current_time;
+
+
+        // D. Compute Numerical Acceleration (Linear and Angular)
+        // We need velocities at t+delta_num_diff and t-delta_num_diff to compute acceleration at t
+        // Let's use Evaluate for velocities, not just pose.
+
+        // Evaluate at t+delta_num_diff and t-delta_num_diff to get full results (poses and velocities)
+        // We already have res_plus and res_minus from velocity calculation.
+        // So, we use v_world from res_plus and res_minus.
+        Eigen::Vector3d a_world_num = (res_plus.v_world - res_minus.v_world) / (2 * delta_num_diff);
+        
+        // Analytical alpha_body comes from `analytical_res.alpha_body`
+        Eigen::Vector3d alpha_body_num = (res_plus.w_body - res_minus.w_body) / (2 * delta_num_diff);
+
+
+        // E. Assert Accelerations
+        EXPECT_NEAR(analytical_res.a_world.x(), a_world_num.x(), 1e-4) << "Time: " << current_time;
+        EXPECT_NEAR(analytical_res.a_world.y(), a_world_num.y(), 1e-4) << "Time: " << current_time;
+        EXPECT_NEAR(analytical_res.a_world.z(), a_world_num.z(), 1e-4) << "Time: " << current_time;
+        
+        EXPECT_NEAR(analytical_res.alpha_body.x(), alpha_body_num.x(), 1e-4) << "Time: " << current_time;
+        EXPECT_NEAR(analytical_res.alpha_body.y(), alpha_body_num.y(), 1e-4) << "Time: " << current_time;
+        EXPECT_NEAR(analytical_res.alpha_body.z(), alpha_body_num.z(), 1e-4) << "Time: " << current_time;
+
+        // F. IMU Consistency Check: a_world = R_wb * ( dot(v_body) + (w_body)^ v_body )
+        // From analytical results:
+        // analytical_res.a_world is a_world
+        // analytical_res.pose.so3() is R_wb
+        // analytical_res.v_body is v_body (linear velocity in body frame)
+        // analytical_res.w_body is w_body (angular velocity in body frame)
+        // analytical_res.a_body is dot(v_body) (linear acceleration in body frame) -- NOTE: This is NOT a_world, it's linear acc in body frame
+
+        // Calculate the right-hand side of the IMU consistency equation
+        Eigen::Matrix3d w_body_hat = Sophus::SO3d::hat(analytical_res.w_body);
+        Eigen::Vector3d rhs_imu_check = analytical_res.pose.so3() * (analytical_res.a_body + w_body_hat * analytical_res.v_body);
+
+        EXPECT_NEAR(analytical_res.a_world.x(), rhs_imu_check.x(), 1e-4) << "IMU Consistency (X) failed at time: " << current_time;
+        EXPECT_NEAR(analytical_res.a_world.y(), rhs_imu_check.y(), 1e-4) << "IMU Consistency (Y) failed at time: " << current_time;
+        EXPECT_NEAR(analytical_res.a_world.z(), rhs_imu_check.z(), 1e-4) << "IMU Consistency (Z) failed at time: " << current_time;
     }
 }
 
-int main() {
-    // Random seed for reproducibility
-    std::mt19937 gen(42);
-    std::normal_distribution<double> noise(0.0, 0.1);
-
-    double dt_spline = 0.1;
-    std::vector<ControlPoint> control_points;
-    
-    std::cout << "Initializing Control Points..." << std::endl;
-    for (int i = 0; i < 4; ++i) {
-        Eigen::Vector3d t_vec(i * 1.0 + noise(gen), noise(gen), noise(gen));
-        Eigen::Quaterniond q = Eigen::Quaterniond::UnitRandom();
-        Sophus::SE3d pose(q, t_vec);
-        control_points.emplace_back(i * dt_spline, pose);
-    }
-
-    double t_query = 0.15;
-    
-    // Normalized time u for t_query relative to the segment starting at t=0.1
-    // t0=0.0, t1=0.1, t2=0.2, t3=0.3
-    // Active segment is [t1, t2) -> [0.1, 0.2)
-    // u = (t - t1) / dt = (0.15 - 0.1) / 0.1 = 0.5
-    double u = (t_query - control_points[1].timestamp()) / dt_spline;
-
-    // Analytical Evaluation
-    BSplineEvaluator::Result<double> analytical = BSplineEvaluator::Evaluate(
-        u, dt_spline, 
-        control_points[0], control_points[1], control_points[2], control_points[3]
-    );
-
-    // Numerical Differentiation Parameters
-    double eps = 1e-5;
-    double dt_num = eps * dt_spline; // Small time step for finite difference
-
-    // Calculate Pose at t - dt_num and t + dt_num
-    double u_prev = (t_query - dt_num - control_points[1].timestamp()) / dt_spline;
-    double u_next = (t_query + dt_num - control_points[1].timestamp()) / dt_spline;
-
-    auto res_prev = BSplineEvaluator::Evaluate(u_prev, dt_spline, control_points[0], control_points[1], control_points[2], control_points[3]);
-    auto res_next = BSplineEvaluator::Evaluate(u_next, dt_spline, control_points[0], control_points[1], control_points[2], control_points[3]);
-
-    // Numerical Linear Velocity (World)
-    Eigen::Vector3d v_world_num = (res_next.pose.translation() - res_prev.pose.translation()) / (2 * dt_num);
-
-    // Numerical Angular Velocity (Body)
-    // w_body ≈ log(R(t-dt)^-1 * R(t+dt)) / (2*dt)
-    Sophus::SO3d R_prev = res_prev.pose.so3();
-    Sophus::SO3d R_next = res_next.pose.so3();
-    Eigen::Vector3d w_body_num = (R_prev.inverse() * R_next).log() / (2 * dt_num);
-
-    std::cout << "\n--- Velocity Check ---" << std::endl;
-    assert_near("V_world", analytical.v_world, v_world_num);
-    assert_near("W_body", analytical.w_body, w_body_num);
-
-    // Numerical Acceleration
-    // Differentiating analytical velocities from neighbors
-    Eigen::Vector3d v_world_prev = res_prev.v_world;
-    Eigen::Vector3d v_world_next = res_next.v_world;
-    Eigen::Vector3d a_world_num = (v_world_next - v_world_prev) / (2 * dt_num);
-
-    Eigen::Vector3d w_body_prev = res_prev.w_body;
-    Eigen::Vector3d w_body_next = res_next.w_body;
-    Eigen::Vector3d alpha_body_num = (w_body_next - w_body_prev) / (2 * dt_num);
-
-    std::cout << "\n--- Acceleration Check ---" << std::endl;
-    assert_near("A_world", analytical.a_world, a_world_num);
-    assert_near("Alpha_body", analytical.alpha_body, alpha_body_num);
-
-    std::cout << "\nAll checks passed successfully!" << std::endl;
-    return 0;
+int main(int argc, char **argv) {
+    ::testing::InitGoogleTest(&argc, argv);
+    return RUN_ALL_TESTS();
 }
