@@ -73,7 +73,7 @@ TEST(BSplineDerivativesTest, NumericalVerification) {
         }
 
         // A. Get Analytical Derivatives
-        auto analytical_res = BSplineEvaluator<double>::Evaluate(
+        auto analytical_res = BSplineEvaluator::Evaluate(
             u_normalized, dt_eval, 
             control_points[segment_idx], control_points[segment_idx+1], 
             control_points[segment_idx+2], control_points[segment_idx+3]
@@ -83,12 +83,12 @@ TEST(BSplineDerivativesTest, NumericalVerification) {
         double u_plus_dt_num = (current_time + delta_num_diff - control_points[segment_idx].timestamp()) / dt_eval;
         double u_minus_dt_num = (current_time - delta_num_diff - control_points[segment_idx].timestamp()) / dt_eval;
 
-        auto res_plus = BSplineEvaluator<double>::Evaluate(
+        auto res_plus = BSplineEvaluator::Evaluate(
             u_plus_dt_num, dt_eval, 
             control_points[segment_idx], control_points[segment_idx+1], 
             control_points[segment_idx+2], control_points[segment_idx+3]
         );
-        auto res_minus = BSplineEvaluator<double>::Evaluate(
+        auto res_minus = BSplineEvaluator::Evaluate(
             u_minus_dt_num, dt_eval, 
             control_points[segment_idx], control_points[segment_idx+1], 
             control_points[segment_idx+2], control_points[segment_idx+3]
@@ -143,7 +143,7 @@ TEST(BSplineDerivativesTest, NumericalVerification) {
 
         // Calculate the right-hand side of the IMU consistency equation
         Eigen::Matrix3d w_body_hat = Sophus::SO3d::hat(analytical_res.w_body);
-        Eigen::Vector3d rhs_imu_check = analytical_res.pose.so3() * (analytical_res.a_body + w_body_hat * analytical_res.v_body);
+        Eigen::Vector3d rhs_imu_check = analytical_res.pose.so3() * (analytical_res.linear_accel_body + w_body_hat * analytical_res.v_body);
 
         EXPECT_NEAR(analytical_res.a_world.x(), rhs_imu_check.x(), 1e-4) << "IMU Consistency (X) failed at time: " << current_time;
         EXPECT_NEAR(analytical_res.a_world.y(), rhs_imu_check.y(), 1e-4) << "IMU Consistency (Y) failed at time: " << current_time;

@@ -76,9 +76,13 @@ target_link_libraries(${PROJECT_NAME}
 find_package(Ceres REQUIRED)
 target_link_libraries(${PROJECT_NAME} ${CERES_LIBRARIES})
 
+# GTest
+find_package(GTest REQUIRED)
+
 # Test Executable (Manual GTest replacement)
 add_executable(test_bspline_derivatives test/test_bspline_derivatives.cpp)
-target_link_libraries(test_bspline_derivatives ${YAML_CPP_LIBRARIES} Sophus::Sophus)
+target_link_libraries(test_bspline_derivatives ${YAML_CPP_LIBRARIES} Sophus::Sophus GTest::gtest GTest::gtest_main)
+add_test(NAME test_bspline_derivatives COMMAND test_bspline_derivatives)
 
 # Example: Spline Fitting
 add_executable(test_spline_fitting examples/test_spline_fitting.cpp src/factors/pose_manifold.cc)

@@ -16,8 +16,10 @@ public:
     struct Result {
         Sophus::SE3<T> pose;            // T_wb
         Eigen::Matrix<T, 3, 1> v_world;      // Linear velocity in World frame
+        Eigen::Matrix<T, 3, 1> v_body;       // Linear velocity in Body frame
         Eigen::Matrix<T, 3, 1> w_body;       // Angular velocity in Body frame
         Eigen::Matrix<T, 3, 1> a_world;      // Linear acceleration in World frame
+        Eigen::Matrix<T, 3, 1> linear_accel_body; // Linear acceleration in Body frame (v_body_dot)
         Eigen::Matrix<T, 3, 1> alpha_body;   // Angular acceleration in Body frame
     };
 
@@ -188,8 +190,10 @@ public:
         Result<T> res;
         res.pose = T_wb;
         res.v_world = v_world;
+        res.v_body = v_body; // Assign new member
         res.w_body = w_body;
         res.a_world = a_world;
+        res.linear_accel_body = a_body; // Assign new member (which is v_body_dot)
         res.alpha_body = alpha_body;
 
         return res;
