@@ -98,56 +98,40 @@ TEST(BSplineDerivativesTest, NumericalVerification) {
         Eigen::Vector3d v_world_num = (res_plus.pose.translation() - res_minus.pose.translation()) / (2 * delta_num_diff);
         
         // Numerical Angular Velocity (Body Frame)
-        // w_body ≈ log(R(t-dt)^-1 * R(t+dt)) / (2*dt)
+        // w_body ≈ log(R(t-dt)^-1 * R(t+dt)) / (2 * delta_num_diff)
         Eigen::Vector3d w_body_num = (res_minus.pose.so3().inverse() * res_plus.pose.so3()).log() / (2 * delta_num_diff);
 
         // C. Assert Velocities
-        EXPECT_NEAR(analytical_res.v_world.x(), v_world_num.x(), 1e-4) << "Time: " << current_time;
-        EXPECT_NEAR(analytical_res.v_world.y(), v_world_num.y(), 1e-4) << "Time: " << current_time;
-        EXPECT_NEAR(analytical_res.v_world.z(), v_world_num.z(), 1e-4) << "Time: " << current_time;
+        EXPECT_NEAR(analytical_res.v_world.x(), v_world_num.x(), 1e-4);
+        EXPECT_NEAR(analytical_res.v_world.y(), v_world_num.y(), 1e-4);
+        EXPECT_NEAR(analytical_res.v_world.z(), v_world_num.z(), 1e-4);
         
-        EXPECT_NEAR(analytical_res.w_body.x(), w_body_num.x(), 1e-4) << "Time: " << current_time;
-        EXPECT_NEAR(analytical_res.w_body.y(), w_body_num.y(), 1e-4) << "Time: " << current_time;
-        EXPECT_NEAR(analytical_res.w_body.z(), w_body_num.z(), 1e-4) << "Time: " << current_time;
+        EXPECT_NEAR(analytical_res.w_body.x(), w_body_num.x(), 1e-4);
+        EXPECT_NEAR(analytical_res.w_body.y(), w_body_num.y(), 1e-4);
+        EXPECT_NEAR(analytical_res.w_body.z(), w_body_num.z(), 1e-4);
 
 
         // D. Compute Numerical Acceleration (Linear and Angular)
-        // We need velocities at t+delta_num_diff and t-delta_num_diff to compute acceleration at t
-        // Let's use Evaluate for velocities, not just pose.
-
-        // Evaluate at t+delta_num_diff and t-delta_num_diff to get full results (poses and velocities)
-        // We already have res_plus and res_minus from velocity calculation.
-        // So, we use v_world from res_plus and res_minus.
         Eigen::Vector3d a_world_num = (res_plus.v_world - res_minus.v_world) / (2 * delta_num_diff);
-        
-        // Analytical alpha_body comes from `analytical_res.alpha_body`
         Eigen::Vector3d alpha_body_num = (res_plus.w_body - res_minus.w_body) / (2 * delta_num_diff);
 
 
         // E. Assert Accelerations
-        EXPECT_NEAR(analytical_res.a_world.x(), a_world_num.x(), 1e-4) << "Time: " << current_time;
-        EXPECT_NEAR(analytical_res.a_world.y(), a_world_num.y(), 1e-4) << "Time: " << current_time;
-        EXPECT_NEAR(analytical_res.a_world.z(), a_world_num.z(), 1e-4) << "Time: " << current_time;
+        EXPECT_NEAR(analytical_res.a_world.x(), a_world_num.x(), 1e-4);
+        EXPECT_NEAR(analytical_res.a_world.y(), a_world_num.y(), 1e-4);
+        EXPECT_NEAR(analytical_res.a_world.z(), a_world_num.z(), 1e-4);
         
-        EXPECT_NEAR(analytical_res.alpha_body.x(), alpha_body_num.x(), 1e-4) << "Time: " << current_time;
-        EXPECT_NEAR(analytical_res.alpha_body.y(), alpha_body_num.y(), 1e-4) << "Time: " << current_time;
-        EXPECT_NEAR(analytical_res.alpha_body.z(), alpha_body_num.z(), 1e-4) << "Time: " << current_time;
+        EXPECT_NEAR(analytical_res.alpha_body.x(), alpha_body_num.x(), 1e-4);
+        EXPECT_NEAR(analytical_res.alpha_body.y(), alpha_body_num.y(), 1e-4);
+        EXPECT_NEAR(analytical_res.alpha_body.z(), alpha_body_num.z(), 1e-4);
 
-        // F. IMU Consistency Check: a_world = R_wb * ( dot(v_body) + (w_body)^ v_body )
-        // From analytical results:
-        // analytical_res.a_world is a_world
-        // analytical_res.pose.so3() is R_wb
-        // analytical_res.v_body is v_body (linear velocity in body frame)
-        // analytical_res.w_body is w_body (angular velocity in body frame)
-        // analytical_res.a_body is dot(v_body) (linear acceleration in body frame) -- NOTE: This is NOT a_world, it's linear acc in body frame
-
-        // Calculate the right-hand side of the IMU consistency equation
+        // F. IMU Consistency Check: a_world = R_wb * ( linear_accel_body + (w_body)^ v_body )
         Eigen::Matrix3d w_body_hat = Sophus::SO3d::hat(analytical_res.w_body);
         Eigen::Vector3d rhs_imu_check = analytical_res.pose.so3() * (analytical_res.linear_accel_body + w_body_hat * analytical_res.v_body);
 
-        EXPECT_NEAR(analytical_res.a_world.x(), rhs_imu_check.x(), 1e-4) << "IMU Consistency (X) failed at time: " << current_time;
-        EXPECT_NEAR(analytical_res.a_world.y(), rhs_imu_check.y(), 1e-4) << "IMU Consistency (Y) failed at time: " << current_time;
-        EXPECT_NEAR(analytical_res.a_world.z(), rhs_imu_check.z(), 1e-4) << "IMU Consistency (Z) failed at time: " << current_time;
+        EXPECT_NEAR(analytical_res.a_world.x(), rhs_imu_check.x(), 1e-4);
+        EXPECT_NEAR(analytical_res.a_world.y(), rhs_imu_check.y(), 1e-4);
+        EXPECT_NEAR(analytical_res.a_world.z(), rhs_imu_check.z(), 1e-4);
     }
 }
 
