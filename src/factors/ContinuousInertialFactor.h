@@ -14,9 +14,9 @@ struct ContinuousInertialFactor {
     // Note: l_ga is now an optimization parameter block, not a fixed member
     ContinuousInertialFactor(double t_meas, const Eigen::Vector3d& accel_meas, const Eigen::Vector3d& gyro_meas,
                              const Eigen::Vector3d& gravity,
-                             double dt, double t0)
+                             double dt, double t0, double sigma_a, double sigma_g)
         : t_meas_(t_meas), accel_meas_(accel_meas), gyro_meas_(gyro_meas),
-          gravity_(gravity), dt_(dt), t0_(t0) {}
+          gravity_(gravity), dt_(dt), t0_(t0), sigma_a_(sigma_a), sigma_g_(sigma_g) {}
 
     template <typename T>
     bool operator()(const T* const cp0, const T* const cp1, const T* const cp2, const T* const cp3,
@@ -75,19 +75,22 @@ struct ContinuousInertialFactor {
         Vec3T resid_a = accel_meas_.cast<T>() - acc_total;
 
         // 6. Output
-        residuals[0] = resid_g[0];
-        residuals[1] = resid_g[1];
-        residuals[2] = resid_g[2];
-        residuals[3] = resid_a[0];
-        residuals[4] = resid_a[1];
-        residuals[5] = resid_a[2];
+        T inv_sigma_g = T(1.0 / sigma_g_);
+        T inv_sigma_a = T(1.0 / sigma_a_);
+
+        residuals[0] = resid_g[0] * inv_sigma_g;
+        residuals[1] = resid_g[1] * inv_sigma_g;
+        residuals[2] = resid_g[2] * inv_sigma_g;
+        residuals[3] = resid_a[0] * inv_sigma_a;
+        residuals[4] = resid_a[1] * inv_sigma_a;
+        residuals[5] = resid_a[2] * inv_sigma_a;
 
         return true;
     }
 
     static ceres::CostFunction* Create(double t_meas, const Eigen::Vector3d& accel, const Eigen::Vector3d& gyro,
                                        const Eigen::Vector3d& g,
-                                       double dt, double t0) {
+                                       double dt, double t0, double sigma_a, double sigma_g) {
         // Residuals: 6
         // Param Blocks: 
         // 4 Poses (7 each)
@@ -99,7 +102,7 @@ struct ContinuousInertialFactor {
             3, 3, 3, 3,  // Bg 0-3
             3, 3, 3, 3,  // Ba 0-3
             3            // l_ga
-        >(new ContinuousInertialFactor(t_meas, accel, gyro, g, dt, t0));
+        >(new ContinuousInertialFactor(t_meas, accel, gyro, g, dt, t0, sigma_a, sigma_g));
     }
 
 private:
@@ -109,6 +112,8 @@ private:
     Eigen::Vector3d gravity_;
     double dt_;
     double t0_;
+    double sigma_a_;
+    double sigma_g_;
 };
 
 } // namespace factors

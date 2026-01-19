@@ -4,11 +4,30 @@
 gnssfile: "D:/Code/dataset/WID/Datasets/transformedData2/four_wheel_dataset_PassengerCar/trial01/GNSS_use.txt"
 outputpath: "D:/Code/dataset/WID/Datasets/transformedData2/output"
 
+# Calibration (Extrinsics & Options)
+calibration:
+  optimize_leverarm: false
+  # Initial estimate of GNSS antenna in Body frame (T_body_gnss)
+  # If optimize_leverarm is true, the translation part will be optimized.
+  T_body_gnss: 
+    [ 1.0, 0.0, 0.0, 0.0,
+      0.0, 1.0, 0.0, 0.0,
+      0.0, 0.0, 1.0, 0.0,
+      0.0, 0.0, 0.0, 1.0 ]
+
+# IMU Noise Characteristics
+imu_noise:
+  accel_noise: 1.0e-2       # m/s^2 * 1/sqrt(Hz)
+  gyro_noise:  1.0e-3       # rad/s * 1/sqrt(Hz)
+  accel_bias_rw: 1.0e-4     # m/s^3 * 1/sqrt(Hz)
+  gyro_bias_rw:  1.0e-5     # rad/s^2 * 1/sqrt(Hz)
+
 # Main Body IMU
 imu_main:
   file: "D:/Code/dataset/WID/Datasets/transformedData2/four_wheel_dataset_PassengerCar/trial01/Body_IMU.txt"
   columns: 7
   rate_hz: 120
+  # antlever is deprecated, use T_body_gnss in calibration section
   antlever: [ 0.0, 0.0, 0.0 ]
 
 # Processing time parameters
