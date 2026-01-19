@@ -55,6 +55,64 @@ def plot_results(file_path):
     plt.tight_layout()
     plt.savefig('ct_position.png')
 
+    # Plot Error (if GNSS available)
+    if gnss_data is not None:
+        import numpy as np
+        
+        # Interpolate Estimate to GNSS time
+        # Handle time range: only interp within overlapping range
+        t_est = data['Time'].values
+        t_gnss = gnss_data['Time'].values
+        
+        # Find common time range
+        t_min = max(t_est[0], t_gnss[0])
+        t_max = min(t_est[-1], t_gnss[-1])
+        
+        mask = (t_gnss >= t_min) & (t_gnss <= t_max)
+        t_eval = t_gnss[mask]
+        gnss_eval = gnss_data.loc[mask, ['Tx', 'Ty', 'Tz']].values
+        
+        # Interpolate
+        # est_pos = np.zeros_like(gnss_eval)
+        est_tx = np.interp(t_eval, t_est, data['Tx'].values)
+        est_ty = np.interp(t_eval, t_est, data['Ty'].values)
+        est_tz = np.interp(t_eval, t_est, data['Tz'].values)
+        
+        err_x = est_tx - gnss_eval[:, 0]
+        err_y = est_ty - gnss_eval[:, 1]
+        err_z = est_tz - gnss_eval[:, 2]
+        
+        rmse_x = np.sqrt(np.mean(err_x**2))
+        rmse_y = np.sqrt(np.mean(err_y**2))
+        rmse_z = np.sqrt(np.mean(err_z**2))
+        
+        print(f"Error RMSE -> X: {rmse_x:.4f} m, Y: {rmse_y:.4f} m, Z: {rmse_z:.4f} m")
+        
+        plt.figure(figsize=(10, 8))
+        plt.subplot(3, 1, 1)
+        plt.plot(t_eval, err_x, label=f'Err X (RMSE={rmse_x:.2f})')
+        plt.ylabel('Error X (m)')
+        plt.title('Position Error (Est - GNSS)')
+        plt.grid(True)
+        plt.legend()
+        
+        plt.subplot(3, 1, 2)
+        plt.plot(t_eval, err_y, label=f'Err Y (RMSE={rmse_y:.2f})')
+        plt.ylabel('Error Y (m)')
+        plt.grid(True)
+        plt.legend()
+        
+        plt.subplot(3, 1, 3)
+        plt.plot(t_eval, err_z, label=f'Err Z (RMSE={rmse_z:.2f})')
+        plt.ylabel('Error Z (m)')
+        plt.xlabel('Time (s)')
+        plt.grid(True)
+        plt.legend()
+        
+        plt.tight_layout()
+        plt.savefig('ct_error.png')
+        print("Saved error plot to ct_error.png")
+
     # Plot Velocity
     plt.figure(figsize=(10, 8))
     plt.subplot(3, 1, 1)

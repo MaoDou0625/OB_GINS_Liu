@@ -38,6 +38,29 @@ int findControlPointIndex(double t, double t0, double dt, int max_idx) {
     return static_cast<int>(std::floor((t - dt - t0) / dt));
 }
 
+struct LeverArmPriorFactor {
+    LeverArmPriorFactor(const Eigen::Vector3d& prior, double sigma)
+        : prior_(prior), sigma_(sigma) {}
+
+    template <typename T>
+    bool operator()(const T* const l_ptr, T* residuals) const {
+        Eigen::Map<const Eigen::Matrix<T, 3, 1>> l(l_ptr);
+        
+        residuals[0] = (l[0] - T(prior_[0])) / T(sigma_);
+        residuals[1] = (l[1] - T(prior_[1])) / T(sigma_);
+        residuals[2] = (l[2] - T(prior_[2])) / T(sigma_);
+        return true;
+    }
+
+    static ceres::CostFunction* Create(const Eigen::Vector3d& prior, double sigma) {
+        return new ceres::AutoDiffCostFunction<LeverArmPriorFactor, 3, 3>(
+            new LeverArmPriorFactor(prior, sigma));
+    }
+
+    Eigen::Vector3d prior_;
+    double sigma_;
+};
+
 int main(int argc, char** argv) {
     google::InitGoogleLogging(argv[0]);
     FLAGS_logtostderr = 1;
@@ -224,11 +247,16 @@ int main(int argc, char** argv) {
     }
     
     double t0_spline = control_points.front().timestamp();
-    LOG(INFO) << "Initialized " << control_points.size() << " control points.";
-    LOG(INFO) << "Spline start time: " << t0_spline;
-
-        // 4. Build Factor Graph
-        LOG(INFO) << "Building Factor Graph...";
+        LOG(INFO) << "Initialized " << control_points.size() << " control points.";
+        LOG(INFO) << "Spline start time: " << t0_spline;
+        
+        // Debug: Check initial CP positions
+        for(size_t i=0; i<std::min((size_t)5, control_points.size()); ++i) {
+            LOG(INFO) << "Init CP[" << i << "] t=" << control_points[i].timestamp() 
+                      << " Pos: " << control_points[i].pose().translation().transpose();
+        }
+    
+        // 4. Build Factor Graph        LOG(INFO) << "Building Factor Graph...";
         ceres::Problem problem;
         auto* se3_manifold = new SophusSE3Manifold();
     
@@ -321,12 +349,16 @@ int main(int argc, char** argv) {
             gnss_residual_ids.push_back(id);
             added_gnss++;
         }
-        problem.AddParameterBlock(l_gnss.data(), 3);
-        if (!optimize_leverarm) {
-            problem.SetParameterBlockConstant(l_gnss.data());
-        }
-        LOG(INFO) << "Added " << added_gnss << " GNSS factors.";
-    
+            problem.AddParameterBlock(l_gnss.data(), 3);
+            if (!optimize_leverarm) {
+                problem.SetParameterBlockConstant(l_gnss.data());
+                } else {
+                    // Add Prior to prevent unobservability (especially in Z direction for cars)
+                    // Sigma = 0.01m (tight constraint to force bias estimation instead of lever arm drift)
+                    auto* prior_factor = LeverArmPriorFactor::Create(initial_l_gnss, 0.01);
+                    problem.AddResidualBlock(prior_factor, nullptr, l_gnss.data());
+                    LOG(INFO) << "Added LeverArm Prior (sigma=0.01m)";
+                }            LOG(INFO) << "Added " << added_gnss << " GNSS factors.";    
         auto EvaluateRMSE = [&](const std::string& label) {
             double cost_imu = 0, cost_gnss = 0;
             ceres::Problem::EvaluateOptions opt_imu;
@@ -354,12 +386,14 @@ int main(int argc, char** argv) {
         options.num_threads = 8;
     
         ceres::Solver::Summary summary;
-        ceres::Solve(options, &problem, &summary);
-        LOG(INFO) << summary.FullReport();
-    
-        EvaluateRMSE("Final");
-    
-        // 6. Export Result
+    ceres::Solve(options, &problem, &summary);
+    LOG(INFO) << summary.FullReport();
+
+    LOG(INFO) << "Optimized Lever Arms:";
+    LOG(INFO) << "  l_gnss (Body->Ant): " << l_gnss.transpose();
+    LOG(INFO) << "  l_imu (Body->IMU):  " << l_imu.transpose();
+
+    // 6. Export Result
         LOG(INFO) << "Exporting trajectory...";
         std::filesystem::path out_file = std::filesystem::path(output_path) / "OB_GINS_CT.txt";
         FILE* fp = fopen(out_file.string().c_str(), "w");
