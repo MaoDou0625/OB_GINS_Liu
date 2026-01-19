@@ -6,7 +6,7 @@ outputpath: "D:/Code/dataset/WID/Datasets/transformedData2/output"
 
 # Calibration (Extrinsics & Options)
 calibration:
-  optimize_leverarm: false
+  optimize_leverarm: true
   # Initial estimate of GNSS antenna in Body frame (T_body_gnss)
   # If optimize_leverarm is true, the translation part will be optimized.
   T_body_gnss: 

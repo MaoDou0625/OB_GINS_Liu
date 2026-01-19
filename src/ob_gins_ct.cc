@@ -413,5 +413,18 @@ int main(int argc, char** argv) {
     fclose(fp);
     LOG(INFO) << "Done. Saved to " << out_file.string();
 
+    // Export GNSS used (Local Frame) for comparison
+    std::filesystem::path out_gnss = std::filesystem::path(output_path) / "OB_GINS_CT_GNSS.txt";
+    FILE* fp_gnss = fopen(out_gnss.string().c_str(), "w");
+    if (fp_gnss) {
+        fprintf(fp_gnss, "# Time Tx Ty Tz\n");
+        for (const auto& gnss : valid_gnss) {
+            fprintf(fp_gnss, "%.4f %.4f %.4f %.4f\n", 
+                gnss.time, gnss.blh.x(), gnss.blh.y(), gnss.blh.z());
+        }
+        fclose(fp_gnss);
+        LOG(INFO) << "Saved processed GNSS to " << out_gnss.string();
+    }
+
     return 0;
 }
