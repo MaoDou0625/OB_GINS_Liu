@@ -136,3 +136,26 @@ target_link_libraries(test_continuous_gnss ${CERES_LIBRARIES} ${YAML_CPP_LIBRARI
 
 
 
+
+# Test Spline Fitting Analysis (GTest)
+add_executable(test_spline_fitting_gtest test/test_spline_fitting.cpp)
+target_link_libraries(test_spline_fitting_gtest ${YAML_CPP_LIBRARIES} Sophus::Sophus GTest::gtest GTest::gtest_main)
+
+# Continuous Time OB_GINS (Batch Optimization)
+add_executable(ob_gins_ct 
+    src/ob_gins_ct.cc
+    src/common/debug.cc
+    src/common/interpolation.cc
+    src/fileio/fileloader.cc
+    src/fileio/filesaver.cc
+)
+target_link_libraries(ob_gins_ct 
+    ${CERES_LIBRARIES} 
+    ${YAML_CPP_LIBRARIES} 
+    Sophus::Sophus 
+    glog::glog
+    absl::strings
+    absl::str_format
+    absl::time
+)
+

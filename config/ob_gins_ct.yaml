@@ -1,0 +1,20 @@
+# OB_GINS Continuous Time Configuration
+
+# Data files
+gnssfile: "D:/Code/dataset/WID/Datasets/transformedData2/four_wheel_dataset_PassengerCar/trial01/GNSS_use.txt"
+outputpath: "D:/Code/dataset/WID/Datasets/transformedData2/output"
+
+# Main Body IMU
+imu_main:
+  file: "D:/Code/dataset/WID/Datasets/transformedData2/four_wheel_dataset_PassengerCar/trial01/Body_IMU.txt"
+  columns: 7
+  rate_hz: 120
+  antlever: [ 0.0, 0.0, 0.0 ]
+
+# Processing time parameters
+starttime: 1.0
+endtime: 120.0
+aligntime: 3
+
+# Solver settings
+num_iterations: 20
