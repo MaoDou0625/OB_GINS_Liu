@@ -267,6 +267,8 @@ int main(int argc, char** argv) {
         saver.dump({t, p.x(), p.y(), p.z(), q.x(), q.y(), q.z(), q.w()});
     }
 
+    saver.close(); // Ensure file is flushed before python script reads it
+
     LOG(INFO) << "Trajectory saved to: " << result_file;
 
     // 7. Comparison Script
