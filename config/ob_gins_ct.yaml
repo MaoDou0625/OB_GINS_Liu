@@ -13,12 +13,12 @@ imu_main:
   rate_hz: 120
   antlever: [ 0.0, 0.0, 0.0 ]
   imunoise:
-    accel_noise: 1.0e-2       # m/s^2 * 1/sqrt(Hz)
-    gyro_noise:  1.0e-3       # rad/s * 1/sqrt(Hz)
-    accel_bias_rw: 1.0e-4     # m/s^3 * 1/sqrt(Hz)
-    gyro_bias_rw:  1.0e-5     # rad/s^2 * 1/sqrt(Hz)
-    accel_corr_time: 3600.0   # s
-    gyro_corr_time: 3600.0    # s
+    accel_noise: 25      # ug/sqrt(Hz)
+    gyro_noise:  0.004     # deg/s/sqrt(Hz)
+    accel_bias_rw: 5    # ug (Bias Instability)
+    gyro_bias_rw:  1     # deg/h (Bias Instability)
+    accel_corr_time: 3600.0 # s
+    gyro_corr_time: 3600.0  # s
 
 # Wheel IMUs
 center_imu1:
@@ -34,10 +34,10 @@ center_imu1:
   speed_weight: 10.0
   nhc_weight: 10.0
   imunoise:
-    accel_noise: 1.0e-2
-    gyro_noise:  1.0e-3
-    accel_bias_rw: 1.0e-4
-    gyro_bias_rw:  1.0e-5
+    accel_noise: 120      # ug/sqrt(Hz)
+    gyro_noise:  0.007     # deg/s/sqrt(Hz)
+    accel_bias_rw: 20    # ug (Bias Instability)
+    gyro_bias_rw:  10     # deg/h (Bias Instability)
     accel_corr_time: 3600.0
     gyro_corr_time: 3600.0
 
@@ -54,10 +54,13 @@ center_imu2:
   speed_weight: 10.0
   nhc_weight: 10.0
   imunoise:
-    accel_noise: 1.0e-2
-    gyro_noise:  1.0e-3
-    accel_bias_rw: 1.0e-4
-    gyro_bias_rw:  1.0e-5
+    accel_noise: 120      # ug/sqrt(Hz)
+    gyro_noise:  0.007     # deg/s/sqrt(Hz)
+    accel_bias_rw: 20    # ug (Bias Instability)
+    gyro_bias_rw:  10     # deg/h (Bias Instability)
+    accel_corr_time: 3600.0
+    gyro_corr_time: 3600.0
+
 
 center_imu3:
   type: "wheel"
@@ -72,10 +75,13 @@ center_imu3:
   speed_weight: 10.0
   nhc_weight: 10.0
   imunoise:
-    accel_noise: 1.0e-2
-    gyro_noise:  1.0e-3
-    accel_bias_rw: 1.0e-4
-    gyro_bias_rw:  1.0e-5
+    accel_noise: 120      # ug/sqrt(Hz)
+    gyro_noise:  0.007     # deg/s/sqrt(Hz)
+    accel_bias_rw: 20    # ug (Bias Instability)
+    gyro_bias_rw:  10     # deg/h (Bias Instability)
+    accel_corr_time: 3600.0
+    gyro_corr_time: 3600.0
+
 
 center_imu4:
   type: "wheel"
@@ -90,10 +96,13 @@ center_imu4:
   speed_weight: 10.0
   nhc_weight: 10.0
   imunoise:
-    accel_noise: 1.0e-2
-    gyro_noise:  1.0e-3
-    accel_bias_rw: 1.0e-4
-    gyro_bias_rw:  1.0e-5
+    accel_noise: 120      # ug/sqrt(Hz)
+    gyro_noise:  0.007     # deg/s/sqrt(Hz)
+    accel_bias_rw: 20    # ug (Bias Instability)
+    gyro_bias_rw:  10     # deg/h (Bias Instability)
+    accel_corr_time: 3600.0
+    gyro_corr_time: 3600.0
+
 
 # Processing time parameters
 windows: 50

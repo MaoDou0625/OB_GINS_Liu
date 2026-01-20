@@ -85,14 +85,47 @@ void ImuProcessor::LoadExtrinsics(const YAML::Node& config_node) {
 void ImuProcessor::LoadImuNoise(const YAML::Node& config_node) {
     if (config_node["imunoise"]) {
         const auto& n = config_node["imunoise"];
-        if (n["accel_noise"]) acc_noise_ = n["accel_noise"].as<double>();
-        if (n["gyro_noise"]) gyr_noise_ = n["gyro_noise"].as<double>();
-        if (n["accel_bias_rw"]) acc_bias_rw_ = n["accel_bias_rw"].as<double>();
-        if (n["gyro_bias_rw"]) gyr_bias_rw_ = n["gyro_bias_rw"].as<double>();
+        
+        // Load Correlation Times first (needed for Bias RW conversion)
         if (n["accel_corr_time"]) 
             acc_corr_time_ = std::max(1.0, n["accel_corr_time"].as<double>());
         if (n["gyro_corr_time"]) 
             gyr_corr_time_ = std::max(1.0, n["gyro_corr_time"].as<double>());
+
+        double g = 9.80665;
+        double d2r = M_PI / 180.0;
+
+        // Accel Noise: ug/sqrt(Hz) -> m/s^2 (discrete sigma)
+        // val (ug/rtHz) * 1e-6 * g -> m/s^2/rtHz * sqrt(rate) -> m/s^2
+        if (n["accel_noise"]) {
+            double val = n["accel_noise"].as<double>();
+            acc_noise_ = val * 1.0e-6 * g * std::sqrt(rate_hz_);
+        }
+
+        // Gyro Noise: deg/s/sqrt(Hz) -> rad/s (discrete sigma)
+        // val (deg/s/rtHz) * d2r -> rad/s/rtHz * sqrt(rate) -> rad/s
+        if (n["gyro_noise"]) {
+            double val = n["gyro_noise"].as<double>();
+            gyr_noise_ = val * d2r * std::sqrt(rate_hz_);
+        }
+
+        // Accel Bias Instability: ug -> Driving Noise Density (m/s^3/sqrt(Hz) equivalent)
+        // val (ug) * 1e-6 * g -> m/s^2 (sigma_bias)
+        // sigma_driving = sigma_bias * sqrt(2/tau)
+        if (n["accel_bias_rw"]) {
+            double val = n["accel_bias_rw"].as<double>();
+            double sigma_b = val * 1.0e-6 * g;
+            acc_bias_rw_ = sigma_b * std::sqrt(2.0 / acc_corr_time_);
+        }
+
+        // Gyro Bias Instability: deg/h -> Driving Noise Density (rad/s^2/sqrt(Hz) equivalent)
+        // val (deg/h) * d2r / 3600 -> rad/s (sigma_bias)
+        // sigma_driving = sigma_bias * sqrt(2/tau)
+        if (n["gyro_bias_rw"]) {
+            double val = n["gyro_bias_rw"].as<double>();
+            double sigma_b = val * d2r / 3600.0;
+            gyr_bias_rw_ = sigma_b * std::sqrt(2.0 / gyr_corr_time_);
+        }
     }
 }
 
