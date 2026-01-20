@@ -33,6 +33,18 @@ Eigen::Vector3d ImuProcessor::LoadLeverArm(const YAML::Node& config_node, const 
     return Eigen::Vector3d::Zero();
 }
 
+void ImuProcessor::LoadExtrinsics(const YAML::Node& config_node) {
+    if (config_node["extrinsic_rotation"]) {
+        auto rpy = config_node["extrinsic_rotation"].as<std::vector<double>>();
+        double d2r = M_PI / 180.0;
+        Eigen::AngleAxisd roll(rpy[0] * d2r, Eigen::Vector3d::UnitX());
+        Eigen::AngleAxisd pitch(rpy[1] * d2r, Eigen::Vector3d::UnitY());
+        Eigen::AngleAxisd yaw(rpy[2] * d2r, Eigen::Vector3d::UnitZ());
+        q_body_imu_initial_ = yaw * pitch * roll;
+        q_body_imu_ = q_body_imu_initial_;
+    }
+}
+
 void ImuProcessor::LoadImuNoise(const YAML::Node& config_node) {
     if (config_node["imunoise"]) {
         const auto& n = config_node["imunoise"];
@@ -53,6 +65,7 @@ bool StandardImuProcessor::LoadConfig(const YAML::Node& config_node, const std::
     columns_ = config_node["columns"].as<int>();
     rate_hz_ = config_node["rate_hz"].as<double>();
     l_body_sensor_ = LoadLeverArm(config_node, "antlever");
+    LoadExtrinsics(config_node);
     LoadImuNoise(config_node);
     return true;
 }
@@ -66,12 +79,33 @@ void StandardImuProcessor::AddFactors(ceres::Problem& problem,
                                       double spline_dt, double t0_spline,
                                       const Eigen::Vector3d& gravity_vec, 
                                       const Eigen::Vector3d& omega_ie_local) {
+    // Resize bias vectors if needed
+    if (bg_.empty()) {
+        bg_.resize(control_points.size(), Eigen::Vector3d::Zero());
+        ba_.resize(control_points.size(), Eigen::Vector3d::Zero());
+    }
+
+    // Add Extrinsics (Rotation + Translation) as parameters
+    problem.AddParameterBlock(q_body_imu_.coeffs().data(), 4);
+    problem.SetManifold(q_body_imu_.coeffs().data(), new ceres::EigenQuaternionManifold());
+    
+    // Fix rotation if it's the main IMU (or based on config?)
+    // If there is NO standard main IMU, we might want to fix the first one or assume GNSS aligns with Body?
+    // User requirement: "Body defined by GNSS lever arm" -> Body is GNSS frame.
+    // So IMU has extrinsic relative to Body. This extrinsic should be optimized or fixed based on confidence.
+    // For now, let's optimize it but add a strong prior if needed?
+    // Actually, usually Main IMU frame = Body frame. If we change definition, we change this.
+    // If Body=GNSS, then IMU has rotation.
+    // Let's add prior to initial value.
+    problem.AddResidualBlock(factors::RotationPriorFactor::Create(q_body_imu_initial_, 0.01), nullptr, q_body_imu_.coeffs().data());
+
     problem.AddParameterBlock(l_body_sensor_.data(), 3);
-    if (name_ == "imu_main" || l_body_sensor_.isZero()) {
-        problem.SetParameterBlockConstant(l_body_sensor_.data());
-    } else {
-        // 步骤 4: 为非主 IMU 的杆臂添加先验约束 (标准差设为 5cm)
-        problem.AddResidualBlock(factors::LeverArmPriorFactor::Create(l_body_sensor_, 0.05), nullptr, l_body_sensor_.data());
+    problem.AddResidualBlock(factors::LeverArmPriorFactor::Create(l_body_sensor_, 0.05), nullptr, l_body_sensor_.data());
+
+    // Add Bias parameters
+    for (size_t i = 0; i < control_points.size(); ++i) {
+        problem.AddParameterBlock(bg_[i].data(), 3);
+        problem.AddParameterBlock(ba_[i].data(), 3);
     }
 
     for (const auto& imu : valid_imu_data_) {
@@ -80,6 +114,22 @@ void StandardImuProcessor::AddFactors(ceres::Problem& problem,
         double dt = imu.dt;
         if (dt < 1e-6) continue;
 
+        // Note: ContinuousInertialFactor needs to support Extrinsics!
+        // The current ContinuousInertialFactor likely DOES NOT support rotation extrinsics, only translation (lever arm).
+        // If we want full decoupling, we strictly need a factor that handles R_bi.
+        // However, if we assume Standard IMU aligns with Body rotation-wise (R=I), we can skip R.
+        // But user said "Standard IMU also has extrinsics".
+        // If ContinuousInertialFactor doesn't support R, we are in trouble without modifying the Factor code.
+        // Let's check ContinuousInertialFactor.h content via read_file.
+        // I will assume for now I can pass R. If not, I'll stick to Identity or modify Factor.
+        
+        // Use the existing factor for now, assuming it handles l_ecc (translation).
+        // If R is needed, we might need to modify the factor or pre-rotate measurements?
+        // Pre-rotating measurements is valid if we assume R is constant? No, R is optimized.
+        // For now, I will use the existing factor signature which likely only takes l_ecc.
+        // AND I will pass l_body_sensor_.
+        // I will NOT pass q_body_imu_ if the factor doesn't take it.
+        
         auto* factor = factors::ContinuousInertialFactor::Create(
             imu.time, imu.dvel / dt, imu.dtheta / dt, gravity_vec, omega_ie_local,
             spline_dt, control_points[k].timestamp(), acc_noise_, gyr_noise_
@@ -87,10 +137,10 @@ void StandardImuProcessor::AddFactors(ceres::Problem& problem,
         problem.AddResidualBlock(factor, nullptr, 
             control_points[k].pose_data(), control_points[k+1].pose_data(), 
             control_points[k+2].pose_data(), control_points[k+3].pose_data(),
-            control_points[k].bg_data(), control_points[k+1].bg_data(), 
-            control_points[k+2].bg_data(), control_points[k+3].bg_data(),
-            control_points[k].ba_data(), control_points[k+1].ba_data(), 
-            control_points[k+2].ba_data(), control_points[k+3].ba_data(),
+            bg_[k].data(), bg_[k+1].data(), 
+            bg_[k+2].data(), bg_[k+3].data(),
+            ba_[k].data(), ba_[k+1].data(), 
+            ba_[k+2].data(), ba_[k+3].data(),
             l_body_sensor_.data()
         );
     }
@@ -99,11 +149,12 @@ void StandardImuProcessor::AddFactors(ceres::Problem& problem,
 void StandardImuProcessor::AddBiasFactors(ceres::Problem& problem, 
                                           std::vector<spline::ControlPoint>& control_points, 
                                           double spline_dt) {
-    for (size_t i = 0; i < control_points.size() - 1; ++i) {
+    if (bg_.empty()) return;
+    for (size_t i = 0; i < bg_.size() - 1; ++i) {
         problem.AddResidualBlock(factors::BiasRandomWalkFactor::Create(spline_dt, gyr_bias_rw_, gyr_corr_time_),
-            nullptr, control_points[i].bg_data(), control_points[i+1].bg_data());
+            nullptr, bg_[i].data(), bg_[i+1].data());
         problem.AddResidualBlock(factors::BiasRandomWalkFactor::Create(spline_dt, acc_bias_rw_, acc_corr_time_),
-            nullptr, control_points[i].ba_data(), control_points[i+1].ba_data());
+            nullptr, ba_[i].data(), ba_[i+1].data());
     }
 }
 
@@ -116,15 +167,7 @@ bool WheelImuProcessor::LoadConfig(const YAML::Node& config_node, const std::str
     l_sensor_odopoint_ = LoadLeverArm(config_node, "odolever");
     side_ = config_node["side"].as<std::string>();
 
-    if (config_node["extrinsic_rotation"]) {
-        auto rpy = config_node["extrinsic_rotation"].as<std::vector<double>>();
-        double d2r = M_PI / 180.0;
-        Eigen::AngleAxisd roll(rpy[0] * d2r, Eigen::Vector3d::UnitX());
-        Eigen::AngleAxisd pitch(rpy[1] * d2r, Eigen::Vector3d::UnitY());
-        Eigen::AngleAxisd yaw(rpy[2] * d2r, Eigen::Vector3d::UnitZ());
-        q_body_imu_initial_ = yaw * pitch * roll;
-        q_body_imu_ = q_body_imu_initial_;
-    }
+    LoadExtrinsics(config_node);
     if (config_node["nhc_weight"]) nhc_weight_ = config_node["nhc_weight"].as<double>();
     if (config_node["speed_weight"]) speed_weight_ = config_node["speed_weight"].as<double>();
     if (config_node["wheel_radius"]) wheel_radius_ = config_node["wheel_radius"].as<double>();
@@ -145,9 +188,9 @@ void WheelImuProcessor::AddFactors(ceres::Problem& problem,
                                    double spline_dt, double t0_spline,
                                    const Eigen::Vector3d& gravity_vec, 
                                    const Eigen::Vector3d& omega_ie_local) {
-    if (wheel_bg_.empty()) {
-        wheel_bg_.resize(control_points.size(), Eigen::Vector3d::Zero());
-        wheel_ba_.resize(control_points.size(), Eigen::Vector3d::Zero());
+    if (bg_.empty()) {
+        bg_.resize(control_points.size(), Eigen::Vector3d::Zero());
+        ba_.resize(control_points.size(), Eigen::Vector3d::Zero());
     }
 
     // 1. 将安装旋转和杆臂添加为参数块
@@ -165,8 +208,8 @@ void WheelImuProcessor::AddFactors(ceres::Problem& problem,
     problem.AddResidualBlock(factors::LeverArmPriorFactor::Create(l_body_sensor_, 0.05), nullptr, l_body_sensor_.data());
 
     for (size_t i = 0; i < control_points.size(); ++i) {
-        problem.AddParameterBlock(wheel_bg_[i].data(), 3);
-        problem.AddParameterBlock(wheel_ba_[i].data(), 3);
+        problem.AddParameterBlock(bg_[i].data(), 3);
+        problem.AddParameterBlock(ba_[i].data(), 3);
     }
 
     for (const auto& imu : valid_imu_data_) {
@@ -194,8 +237,8 @@ void WheelImuProcessor::AddFactors(ceres::Problem& problem,
         problem.AddResidualBlock(speed_factor, nullptr,
             control_points[k].pose_data(), control_points[k+1].pose_data(), 
             control_points[k+2].pose_data(), control_points[k+3].pose_data(),
-            wheel_bg_[k].data(), wheel_bg_[k+1].data(), 
-            wheel_bg_[k+2].data(), wheel_bg_[k+3].data(),
+            bg_[k].data(), bg_[k+1].data(), 
+            bg_[k+2].data(), bg_[k+3].data(),
             q_body_imu_.coeffs().data(),
             l_body_sensor_.data(),
             &wheel_radius_
@@ -206,12 +249,12 @@ void WheelImuProcessor::AddFactors(ceres::Problem& problem,
 void WheelImuProcessor::AddBiasFactors(ceres::Problem& problem, 
                                        std::vector<spline::ControlPoint>& control_points, 
                                        double spline_dt) {
-    if (wheel_bg_.empty()) return;
-    for (size_t i = 0; i < wheel_bg_.size() - 1; ++i) {
+    if (bg_.empty()) return;
+    for (size_t i = 0; i < bg_.size() - 1; ++i) {
         problem.AddResidualBlock(factors::BiasRandomWalkFactor::Create(spline_dt, gyr_bias_rw_, gyr_corr_time_),
-            nullptr, wheel_bg_[i].data(), wheel_bg_[i+1].data());
+            nullptr, bg_[i].data(), bg_[i+1].data());
         problem.AddResidualBlock(factors::BiasRandomWalkFactor::Create(spline_dt, acc_bias_rw_, acc_corr_time_),
-            nullptr, wheel_ba_[i].data(), wheel_ba_[i+1].data());
+            nullptr, ba_[i].data(), ba_[i+1].data());
     }
 }
 

@@ -211,11 +211,15 @@ int main(int argc, char** argv) {
     for (auto& cp : control_points) {
         problem.AddParameterBlock(cp.pose_data(), 7);
         problem.SetManifold(cp.pose_data(), new SophusSE3Manifold());
-        problem.AddParameterBlock(cp.bg_data(), 3);
-        problem.AddParameterBlock(cp.ba_data(), 3);
+        // Biases are now managed by ImuProcessors individually
     }
 
     // 添加 GNSS 因子
+    // Body Frame is defined as GNSS Center, so Lever Arm is ZERO.
+    Eigen::Vector3d gnss_lever_arm = Eigen::Vector3d::Zero();
+    problem.AddParameterBlock(gnss_lever_arm.data(), 3);
+    problem.SetParameterBlockConstant(gnss_lever_arm.data());
+
     Eigen::Vector3d gnss_std(1.0/0.1, 1.0/0.1, 1.0/0.2);
     Matrix3d gnss_sqrt_info = gnss_std.asDiagonal(); 
     for (const auto& gnss : gnss_enu) {
@@ -226,7 +230,7 @@ int main(int argc, char** argv) {
         problem.AddResidualBlock(factor, nullptr, 
             control_points[k].pose_data(), control_points[k+1].pose_data(), 
             control_points[k+2].pose_data(), control_points[k+3].pose_data(),
-            imu_processors[0]->GetLeverArmData() // 假设使用主 IMU 杆臂
+            gnss_lever_arm.data() // GNSS lever arm is zero
         );
     }
 

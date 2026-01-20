@@ -57,7 +57,16 @@ protected:
 
     bool LoadImuFileAndFilter(double t_start, double t_end);
     Eigen::Vector3d LoadLeverArm(const YAML::Node& config_node, const std::string& key);
+    void LoadExtrinsics(const YAML::Node& config_node);
     void LoadImuNoise(const YAML::Node& config_node);
+
+    // IMU biases (one per control point)
+    std::vector<Eigen::Vector3d> bg_;
+    std::vector<Eigen::Vector3d> ba_;
+
+    // Extrinsics: Rotation from Body to IMU
+    Eigen::Quaterniond q_body_imu_initial_ = Eigen::Quaterniond::Identity();
+    Eigen::Quaterniond q_body_imu_ = Eigen::Quaterniond::Identity();
 };
 
 // 标准IMU处理器
@@ -94,12 +103,7 @@ public:
 private:
     std::string side_;
     Eigen::Vector3d l_sensor_odopoint_;
-    Eigen::Quaterniond q_body_imu_initial_;
-    Eigen::Quaterniond q_body_imu_;
     
-    // 轮式 IMU 专用的零偏控制点
-    std::vector<Eigen::Vector3d> wheel_bg_;
-    std::vector<Eigen::Vector3d> wheel_ba_;
     double wheel_radius_ = 0.3;
     double speed_weight_ = 1.0;
     double nhc_weight_ = 1.0;
