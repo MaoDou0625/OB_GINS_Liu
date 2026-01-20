@@ -26,6 +26,8 @@ def blh_to_enu(blh, origin_blh):
         x = (v + h) * np.cos(lat) * np.cos(lon)
         y = (v + h) * np.cos(lat) * np.sin(lon)
         z = (v * (1 - e2) + h) * np.sin(lat)
+        if np.isscalar(lat) or lat.ndim == 0:
+             return np.array([x, y, z])
         return np.stack([x, y, z], axis=1)
 
     p = ecef(lat, lon, h)
