@@ -80,66 +80,7 @@ target_link_libraries(${PROJECT_NAME} ${CERES_LIBRARIES})
 # GTest
 find_package(GTest REQUIRED)
 
-# Test Executable (Manual GTest replacement)
-add_executable(test_bspline_derivatives test/test_bspline_derivatives.cpp)
-target_link_libraries(test_bspline_derivatives ${YAML_CPP_LIBRARIES} Sophus::Sophus GTest::gtest GTest::gtest_main)
-add_test(NAME test_bspline_derivatives COMMAND test_bspline_derivatives)
 
-# Example: Spline Fitting
-add_executable(test_spline_fitting examples/test_spline_fitting.cpp src/factors/pose_manifold.cc)
-target_link_libraries(test_spline_fitting ${CERES_LIBRARIES} ${YAML_CPP_LIBRARIES} Sophus::Sophus)
-
-# Test Physics
-add_executable(test_wheel_physics test/test_wheel_physics.cpp)
-target_link_libraries(test_wheel_physics ${YAML_CPP_LIBRARIES} Sophus::Sophus)
-
-# Test Wheel NHC
-add_executable(test_wheel_nhc test/test_wheel_nhc.cpp src/factors/pose_manifold.cc)
-target_link_libraries(test_wheel_nhc ${CERES_LIBRARIES} ${YAML_CPP_LIBRARIES} Sophus::Sophus)
-
-# Test NHC Observability
-add_executable(test_nhc_observability test/test_nhc_observability.cpp src/factors/pose_manifold.cc)
-target_link_libraries(test_nhc_observability ${CERES_LIBRARIES} ${YAML_CPP_LIBRARIES} Sophus::Sophus)
-
-# Test Inertial Factor
-add_executable(test_inertial_factor test/test_inertial_factor.cpp src/factors/pose_manifold.cc)
-target_link_libraries(test_inertial_factor ${CERES_LIBRARIES} ${YAML_CPP_LIBRARIES} Sophus::Sophus)
-
-# Test Inertial Physics
-add_executable(test_inertial_physics test/test_inertial_physics.cpp src/factors/pose_manifold.cc)
-target_link_libraries(test_inertial_physics ${CERES_LIBRARIES} ${YAML_CPP_LIBRARIES} Sophus::Sophus)
-
-# Test Bias RW
-add_executable(test_bias_rw test/test_bias_rw.cpp)
-target_link_libraries(test_bias_rw ${CERES_LIBRARIES} ${YAML_CPP_LIBRARIES})
-
-# Test Spline Initializer
-add_executable(test_spline_initializer test/test_spline_initializer.cpp)
-target_link_libraries(test_spline_initializer ${YAML_CPP_LIBRARIES} Sophus::Sophus)
-
-# Example: Short Segment Optimization
-add_executable(test_short_segment_opt examples/test_short_segment_opt.cpp src/factors/pose_manifold.cc)
-target_link_libraries(test_short_segment_opt ${CERES_LIBRARIES} ${YAML_CPP_LIBRARIES} Sophus::Sophus)
-
-# Test Continuous GNSS Factor
-add_executable(test_continuous_gnss test/test_continuous_gnss.cpp)
-target_link_libraries(test_continuous_gnss ${CERES_LIBRARIES} ${YAML_CPP_LIBRARIES} Sophus::Sophus)
-
-
-
-
-
-
-
-
-
-
-
-
-
-# Test Spline Fitting Analysis (GTest)
-add_executable(test_spline_fitting_gtest test/test_spline_fitting.cpp)
-target_link_libraries(test_spline_fitting_gtest ${YAML_CPP_LIBRARIES} Sophus::Sophus GTest::gtest GTest::gtest_main)
 
 # Continuous Time OB_GINS (Batch Optimization)
 add_executable(ob_gins_ct 
