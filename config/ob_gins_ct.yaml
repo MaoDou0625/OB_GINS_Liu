@@ -1,39 +1,118 @@
-# OB_GINS Continuous Time Configuration
+# OB_GINS Continuous Time Configuration (Ref: wid.yaml)
 
 # Data files
 gnssfile: "D:/Code/dataset/WID/Datasets/transformedData2/four_wheel_dataset_PassengerCar/trial01/GNSS_use.txt"
 outputpath: "D:/Code/dataset/WID/Datasets/transformedData2/output"
-
-# Calibration (Extrinsics & Options)
-calibration:
-  optimize_leverarm: true
-  # Initial estimate of GNSS antenna in Body frame (T_body_gnss)
-  # If optimize_leverarm is true, the translation part will be optimized.
-  T_body_gnss: 
-    [ 1.0, 0.0, 0.0, 0.0,
-      0.0, 1.0, 0.0, 0.0,
-      0.0, 0.0, 1.0, 0.0,
-      0.0, 0.0, 0.0, 1.0 ]
-
-# IMU Noise Characteristics
-imu_noise:
-  accel_noise: 1.0e-2       # m/s^2 * 1/sqrt(Hz)
-  gyro_noise:  1.0e-3       # rad/s * 1/sqrt(Hz)
-  accel_bias_rw: 1.0e-4     # m/s^3 * 1/sqrt(Hz)
-  gyro_bias_rw:  1.0e-5     # rad/s^2 * 1/sqrt(Hz)
+save_multi_imu: true
 
 # Main Body IMU
 imu_main:
+  type: "standard"
   file: "D:/Code/dataset/WID/Datasets/transformedData2/four_wheel_dataset_PassengerCar/trial01/Body_IMU.txt"
   columns: 7
   rate_hz: 120
-  # antlever is deprecated, use T_body_gnss in calibration section
   antlever: [ 0.0, 0.0, 0.0 ]
+  imunoise:
+    accel_noise: 1.0e-2       # m/s^2 * 1/sqrt(Hz)
+    gyro_noise:  1.0e-3       # rad/s * 1/sqrt(Hz)
+    accel_bias_rw: 1.0e-4     # m/s^3 * 1/sqrt(Hz)
+    gyro_bias_rw:  1.0e-5     # rad/s^2 * 1/sqrt(Hz)
+    accel_corr_time: 3600.0   # s
+    gyro_corr_time: 3600.0    # s
+
+# Wheel IMUs
+center_imu1:
+  type: "wheel"
+  side: "left"
+  file: "D:/Code/dataset/WID/Datasets/transformedData2/four_wheel_dataset_PassengerCar/trial01/center_imu1.txt"
+  columns: 9
+  rate_hz: 120
+  antlever: [ 2.32, 0.7180, 1.4]
+  odolever: [ 0.0, 0.0, 0.0 ]
+  extrinsic_rotation: [ 0.0, 0.0, 0.0 ] # RPY in degrees
+  wheel_radius: 0.3
+  speed_weight: 10.0
+  nhc_weight: 10.0
+  imunoise:
+    accel_noise: 1.0e-2
+    gyro_noise:  1.0e-3
+    accel_bias_rw: 1.0e-4
+    gyro_bias_rw:  1.0e-5
+    accel_corr_time: 3600.0
+    gyro_corr_time: 3600.0
+
+center_imu2:
+  type: "wheel"
+  side: "left"
+  file: "D:/Code/dataset/WID/Datasets/transformedData2/four_wheel_dataset_PassengerCar/trial01/center_imu2.txt"
+  columns: 9
+  rate_hz: 120
+  antlever: [ -0.29, 0.718, 1.4 ]
+  odolever: [ 0.0, 0.0, 0.0 ]
+  extrinsic_rotation: [ 0.0, 0.0, 0.0 ]
+  wheel_radius: 0.3
+  speed_weight: 10.0
+  nhc_weight: 10.0
+  imunoise:
+    accel_noise: 1.0e-2
+    gyro_noise:  1.0e-3
+    accel_bias_rw: 1.0e-4
+    gyro_bias_rw:  1.0e-5
+
+center_imu3:
+  type: "wheel"
+  side: "right"
+  file: "D:/Code/dataset/WID/Datasets/transformedData2/four_wheel_dataset_PassengerCar/trial01/center_imu3.txt"
+  columns: 9
+  rate_hz: 120
+  antlever: [ 2.32, -0.7180, 1.4]
+  odolever: [ 0.0, 0.0, 0.0 ]
+  extrinsic_rotation: [ 0.0, 0.0, 0.0 ]
+  wheel_radius: 0.3
+  speed_weight: 10.0
+  nhc_weight: 10.0
+  imunoise:
+    accel_noise: 1.0e-2
+    gyro_noise:  1.0e-3
+    accel_bias_rw: 1.0e-4
+    gyro_bias_rw:  1.0e-5
+
+center_imu4:
+  type: "wheel"
+  side: "right"
+  file: "D:/Code/dataset/WID/Datasets/transformedData2/four_wheel_dataset_PassengerCar/trial01/center_imu4.txt"
+  columns: 9
+  rate_hz: 120
+  antlever: [ -0.29, -0.750, 1.4 ]
+  odolever: [ 0.0, 0.0, 0.0 ]
+  extrinsic_rotation: [ 0.0, 0.0, 0.0 ]
+  wheel_radius: 0.3
+  speed_weight: 10.0
+  nhc_weight: 10.0
+  imunoise:
+    accel_noise: 1.0e-2
+    gyro_noise:  1.0e-3
+    accel_bias_rw: 1.0e-4
+    gyro_bias_rw:  1.0e-5
 
 # Processing time parameters
-starttime: 1.0
-endtime: 120.0
+windows: 50
+starttime: 1
+endtime: 120
 aligntime: 3
+kf_interval_sec: 0.1
 
-# Solver settings
+# Solver and Physics
 num_iterations: 20
+isearth: true
+
+# Debug and Comparison
+debug:
+  enable: true
+  level: 1
+
+comparison:
+  enable: true
+  python_script: "d:/Code/OB_GINS_Liu/plot_ct_results.py"
+  truth_file: "D:/Code/dataset/WID/Datasets/transformedData2/four_wheel_dataset_PassengerCar/trial01/GNSS_use.txt"
+  label: "OB_GINS_CT"

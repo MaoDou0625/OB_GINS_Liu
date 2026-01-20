@@ -144,10 +144,14 @@ target_link_libraries(test_spline_fitting_gtest ${YAML_CPP_LIBRARIES} Sophus::So
 # Continuous Time OB_GINS (Batch Optimization)
 add_executable(ob_gins_ct 
     src/ob_gins_ct.cc
+    src/core/imu_processor.cc
     src/common/debug.cc
     src/common/interpolation.cc
+    src/common/earth.cc
     src/fileio/fileloader.cc
     src/fileio/filesaver.cc
+    src/fileio/gnssfileloader.cc
+    src/factors/pose_manifold.cc
 )
 target_link_libraries(ob_gins_ct 
     ${CERES_LIBRARIES} 
@@ -158,4 +162,3 @@ target_link_libraries(ob_gins_ct
     absl::str_format
     absl::time
 )
-

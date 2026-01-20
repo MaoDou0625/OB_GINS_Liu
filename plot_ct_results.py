@@ -1,166 +1,100 @@
+import numpy as np
 import matplotlib.pyplot as plt
-import pandas as pd
-import sys
+import argparse
+import os
 
-def plot_results(file_path):
-    # Read the file, skipping the header line starts with #
-    try:
-        data = pd.read_csv(file_path, sep='\s+', comment='#', header=None)
-        # Columns: Time Tx Ty Tz Qx Qy Qz Qw Vx Vy Vz Bgx Bgy Bgz Bax Bay Baz
-        columns = ['Time', 'Tx', 'Ty', 'Tz', 'Qx', 'Qy', 'Qz', 'Qw', 
-                   'Vx', 'Vy', 'Vz', 'Bgx', 'Bgy', 'Bgz', 'Bax', 'Bay', 'Baz']
-        data.columns = columns
-    except Exception as e:
-        print(f"Error reading file: {e}")
+def blh_to_enu(blh, origin_blh):
+    """
+    将 BLH (纬度, 经度, 高度) 转换为局部 ENU 坐标系。
+    blh: Nx3 数组 (度, 度, 米)
+    origin_blh: 1x3 数组 (起始点)
+    """
+    lat = np.radians(blh[:, 0])
+    lon = np.radians(blh[:, 1])
+    h = blh[:, 2]
+    
+    lat0 = np.radians(origin_blh[0])
+    lon0 = np.radians(origin_blh[1])
+    h0 = origin_blh[2]
+    
+    a = 6378137.0
+    f = 1 / 298.257223563
+    e2 = f * (2 - f)
+    
+    def ecef(lat, lon, h):
+        v = a / np.sqrt(1 - e2 * np.sin(lat)**2)
+        x = (v + h) * np.cos(lat) * np.cos(lon)
+        y = (v + h) * np.cos(lat) * np.sin(lon)
+        z = (v * (1 - e2) + h) * np.sin(lat)
+        return np.stack([x, y, z], axis=1)
+
+    p = ecef(lat, lon, h)
+    p0 = ecef(lat0, lon0, h0)
+    
+    dp = p - p0
+    
+    sin_lat0, cos_lat0 = np.sin(lat0), np.cos(lat0)
+    sin_lon0, cos_lon0 = np.sin(lon0), np.cos(lon0)
+    
+    t = np.array([
+        [-sin_lon0, cos_lon0, 0],
+        [-sin_lat0 * cos_lon0, -sin_lat0 * sin_lon0, cos_lat0],
+        [cos_lat0 * cos_lon0, cos_lat0 * sin_lon0, sin_lat0]
+    ])
+    
+    return dp @ t.T
+
+def main():
+    parser = argparse.ArgumentParser(description="Plot OB-GINS-CT results vs Truth")
+    parser.add_argument("--result", type=str, required=True, help="Path to ct_trajectory.txt")
+    parser.add_argument("--truth", type=str, required=True, help="Path to GNSS truth file")
+    parser.add_argument("--label", type=str, default="OB_GINS_CT")
+    args = parser.parse_args()
+
+    if not os.path.exists(args.result):
+        print(f"Error: Result file {args.result} not found.")
         return
 
-    # Try to load GNSS data
-    gnss_path = file_path.replace('OB_GINS_CT.txt', 'OB_GINS_CT_GNSS.txt')
-    gnss_data = None
-    try:
-        gnss_data = pd.read_csv(gnss_path, sep='\s+', comment='#', header=None)
-        # Time Tx Ty Tz
-        gnss_data.columns = ['Time', 'Tx', 'Ty', 'Tz']
-        print(f"Loaded GNSS data from {gnss_path}")
-    except:
-        print(f"Could not load GNSS data from {gnss_path}, skipping comparison.")
+    # 加载结果数据: time, x, y, z, qx, qy, qz, qw (局部坐标系)
+    res_data = np.loadtxt(args.result)
+    res_time = res_data[:, 0]
+    res_pos = res_data[:, 1:4]
 
-    # Plot Position
-    plt.figure(figsize=(10, 8))
-    plt.subplot(3, 1, 1)
-    plt.plot(data['Time'], data['Tx'], label='Est Tx', linewidth=1.5)
-    if gnss_data is not None:
-        plt.scatter(gnss_data['Time'], gnss_data['Tx'], c='r', marker='x', s=10, label='GNSS Tx', alpha=0.5)
-    plt.ylabel('X (m)')
-    plt.title('Position Comparison')
-    plt.legend()
-    plt.grid(True)
-    
-    plt.subplot(3, 1, 2)
-    plt.plot(data['Time'], data['Ty'], label='Est Ty', linewidth=1.5)
-    if gnss_data is not None:
-        plt.scatter(gnss_data['Time'], gnss_data['Ty'], c='r', marker='x', s=10, label='GNSS Ty', alpha=0.5)
-    plt.ylabel('Y (m)')
-    plt.legend()
-    plt.grid(True)
-    
-    plt.subplot(3, 1, 3)
-    plt.plot(data['Time'], data['Tz'], label='Est Tz', linewidth=1.5)
-    if gnss_data is not None:
-        plt.scatter(gnss_data['Time'], gnss_data['Tz'], c='r', marker='x', s=10, label='GNSS Tz', alpha=0.5)
-    plt.ylabel('Z (m)')
-    plt.xlabel('Time (s)')
-    plt.legend()
-    plt.grid(True)
+    # 加载真值数据: time, lat, lon, h, ...
+    # 假设 GnssFileLoader 格式为: time, lat, lon, h
+    truth_data = np.loadtxt(args.truth)
+    truth_time = truth_data[:, 0]
+    truth_blh = truth_data[:, 1:4]
+
+    # 使用第一个真值点作为原点，将真值转换为 ENU
+    origin_blh = truth_blh[0]
+    truth_enu = blh_to_enu(truth_blh, origin_blh)
+
+    # 绘制三轴位置对比图
+    fig, axs = plt.subplots(3, 1, figsize=(10, 10), sharex=True)
+    labels = ['East (m)', 'North (m)', 'Up (m)']
+    for i in range(3):
+        axs[i].plot(truth_time, truth_enu[:, i], 'k--', label='Truth (GNSS)')
+        axs[i].plot(res_time, res_pos[:, i], 'r-', label=args.label)
+        axs[i].set_ylabel(labels[i])
+        axs[i].legend()
+        axs[i].grid(True)
+    axs[2].set_xlabel('Time (s)')
+    plt.suptitle('Trajectory Comparison (Local ENU)')
     plt.tight_layout()
-    plt.savefig('ct_position.png')
 
-    # Plot Error (if GNSS available)
-    if gnss_data is not None:
-        import numpy as np
-        
-        # Interpolate Estimate to GNSS time
-        # Handle time range: only interp within overlapping range
-        t_est = data['Time'].values
-        t_gnss = gnss_data['Time'].values
-        
-        # Find common time range
-        t_min = max(t_est[0], t_gnss[0])
-        t_max = min(t_est[-1], t_gnss[-1])
-        
-        mask = (t_gnss >= t_min) & (t_gnss <= t_max)
-        t_eval = t_gnss[mask]
-        gnss_eval = gnss_data.loc[mask, ['Tx', 'Ty', 'Tz']].values
-        
-        # Interpolate
-        # est_pos = np.zeros_like(gnss_eval)
-        est_tx = np.interp(t_eval, t_est, data['Tx'].values)
-        est_ty = np.interp(t_eval, t_est, data['Ty'].values)
-        est_tz = np.interp(t_eval, t_est, data['Tz'].values)
-        
-        err_x = est_tx - gnss_eval[:, 0]
-        err_y = est_ty - gnss_eval[:, 1]
-        err_z = est_tz - gnss_eval[:, 2]
-        
-        rmse_x = np.sqrt(np.mean(err_x**2))
-        rmse_y = np.sqrt(np.mean(err_y**2))
-        rmse_z = np.sqrt(np.mean(err_z**2))
-        
-        print(f"Error RMSE -> X: {rmse_x:.4f} m, Y: {rmse_y:.4f} m, Z: {rmse_z:.4f} m")
-        
-        plt.figure(figsize=(10, 8))
-        plt.subplot(3, 1, 1)
-        plt.plot(t_eval, err_x, label=f'Err X (RMSE={rmse_x:.2f})')
-        plt.ylabel('Error X (m)')
-        plt.title('Position Error (Est - GNSS)')
-        plt.grid(True)
-        plt.legend()
-        
-        plt.subplot(3, 1, 2)
-        plt.plot(t_eval, err_y, label=f'Err Y (RMSE={rmse_y:.2f})')
-        plt.ylabel('Error Y (m)')
-        plt.grid(True)
-        plt.legend()
-        
-        plt.subplot(3, 1, 3)
-        plt.plot(t_eval, err_z, label=f'Err Z (RMSE={rmse_z:.2f})')
-        plt.ylabel('Error Z (m)')
-        plt.xlabel('Time (s)')
-        plt.grid(True)
-        plt.legend()
-        
-        plt.tight_layout()
-        plt.savefig('ct_error.png')
-        print("Saved error plot to ct_error.png")
-
-    # Plot Velocity
-    plt.figure(figsize=(10, 8))
-    plt.subplot(3, 1, 1)
-    plt.plot(data['Time'], data['Vx'], label='Vx')
-    plt.ylabel('Vx (m/s)')
-    plt.title('Velocity')
-    plt.grid(True)
-    
-    plt.subplot(3, 1, 2)
-    plt.plot(data['Time'], data['Vy'], label='Vy')
-    plt.ylabel('Vy (m/s)')
-    plt.grid(True)
-    
-    plt.subplot(3, 1, 3)
-    plt.plot(data['Time'], data['Vz'], label='Vz')
-    plt.ylabel('Vz (m/s)')
-    plt.xlabel('Time (s)')
-    plt.grid(True)
-    plt.tight_layout()
-    plt.savefig('ct_velocity.png')
-
-    # Plot Bias
-    plt.figure(figsize=(10, 8))
-    plt.subplot(2, 1, 1)
-    plt.plot(data['Time'], data['Bgx'], label='Bgx')
-    plt.plot(data['Time'], data['Bgy'], label='Bgy')
-    plt.plot(data['Time'], data['Bgz'], label='Bgz')
-    plt.ylabel('Gyro Bias (rad/s)')
+    # 绘制 2D 水平轨迹对比图
+    plt.figure(figsize=(8, 8))
+    plt.plot(truth_enu[:, 0], truth_enu[:, 1], 'k--', label='Truth')
+    plt.plot(res_pos[:, 0], res_pos[:, 1], 'r-', label=args.label)
+    plt.xlabel('East (m)')
+    plt.ylabel('North (m)')
+    plt.title('Horizontal Trajectory Comparison')
     plt.legend()
-    plt.title('IMU Bias')
+    plt.axis('equal')
     plt.grid(True)
     
-    plt.subplot(2, 1, 2)
-    plt.plot(data['Time'], data['Bax'], label='Bax')
-    plt.plot(data['Time'], data['Bay'], label='Bay')
-    plt.plot(data['Time'], data['Baz'], label='Baz')
-    plt.ylabel('Accel Bias (m/s^2)')
-    plt.xlabel('Time (s)')
-    plt.legend()
-    plt.grid(True)
-    plt.tight_layout()
-    plt.savefig('ct_bias.png')
-    
-    print("Plots saved to ct_position.png, ct_velocity.png, ct_bias.png")
+    plt.show()
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1:
-        plot_results(sys.argv[1])
-    else:
-        # Default path based on config
-        plot_results(r"D:/Code/dataset/WID/Datasets/transformedData2/output/OB_GINS_CT.txt")
+    main()
