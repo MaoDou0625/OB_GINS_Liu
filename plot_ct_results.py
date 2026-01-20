@@ -78,6 +78,21 @@ def main():
     origin_blh = truth_blh[0]
     truth_enu = blh_to_enu(truth_blh, origin_blh)
 
+    # --- 对齐轨迹 ---
+    # 找到 Result 第一个时间点对应的 Truth 位置
+    t0 = res_time[0]
+    # 在 truth_time 中查找 t0 的索引 (最近邻或插值，这里用简单的最近邻)
+    idx = np.abs(truth_time - t0).argmin()
+    
+    # 计算偏移量: Truth(t0) - Result(t0)
+    # 假设该点对应的 Result 位置为 res_pos[0]
+    offset = truth_enu[idx] - res_pos[0]
+    
+    # 将 Result 轨迹平移对齐到 Truth
+    res_pos += offset
+    print(f"Aligned Result to Truth at t={t0:.3f}s with offset: {offset}")
+    # ----------------
+
     # 绘制三轴位置对比图
     fig, axs = plt.subplots(3, 1, figsize=(10, 10), sharex=True)
     labels = ['East (m)', 'North (m)', 'Up (m)']
