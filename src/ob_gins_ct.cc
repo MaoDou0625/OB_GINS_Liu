@@ -180,7 +180,8 @@ int main(int argc, char** argv) {
     Vector3d origin_ecef = earth.blh2ecef(valid_gnss.front().blh);
 
     if (config["isearth"] && config["isearth"].as<bool>()) {
-        gravity_l = earth.gravity(valid_gnss.front().blh); // 导航系下的重力
+        double g = earth.gravity(valid_gnss.front().blh);
+        gravity_l << 0, 0, -g; // 导航系(ENU)下的重力
         omega_ie_l = earth.iewn(valid_gnss.front().blh(0)); // 导航系下的地球自转
     } else {
         gravity_l << 0, 0, -9.80665;
@@ -192,13 +193,19 @@ int main(int argc, char** argv) {
     
     // 初始化样条曲线控制点 (将 GNSS 转换为局部 ENU 进行初始化)
     std::vector<GNSS> gnss_enu = valid_gnss;
+    std::vector<std::pair<double, Sophus::SE3d>> path_for_init;
+
     for (auto& g : gnss_enu) {
-        Vector3d ecef = earth.blh2ecef(g.blh);
-        g.blh = earth.ecef2enu(ecef, valid_gnss.front().blh); // 借用 blh 字段存储 ENU
+        // Use global2local to convert BLH to local frame (ENU/NED)
+        // Store result in g.blh temporarily
+        g.blh = earth.global2local(valid_gnss.front().blh, g.blh); 
+        
+        // Prepare path for SplineInitializer
+        // Assume identity rotation for initialization if not available
+        path_for_init.emplace_back(g.time, Sophus::SE3d(Eigen::Quaterniond::Identity(), g.blh));
     }
 
-    SplineInitializer initializer(spline_dt);
-    std::vector<ControlPoint> control_points = initializer.init(gnss_enu, t_start_global);
+    std::vector<ControlPoint> control_points = SplineInitializer::InitializeFromPath(path_for_init, spline_dt);
 
     // 设置位姿流形
     for (auto& cp : control_points) {
@@ -209,9 +216,10 @@ int main(int argc, char** argv) {
     }
 
     // 添加 GNSS 因子
-    Matrix3d gnss_sqrt_info = Vector3d(1.0/0.1, 1.0/0.1, 1.0/0.2).asDiagonal(); // 假设 10cm 精度
+    Eigen::Vector3d gnss_std(1.0/0.1, 1.0/0.1, 1.0/0.2);
+    Matrix3d gnss_sqrt_info = gnss_std.asDiagonal(); 
     for (const auto& gnss : gnss_enu) {
-        int k = findControlPointIndex(gnss.time, t_start_global, spline_dt, control_points.size());
+        int k = findControlPointIndex(gnss.time, t_start_global, spline_dt, (int)control_points.size());
         if (k < 0 || k + 3 >= (int)control_points.size()) continue;
 
         auto* factor = ContinuousGnssFactor::Create(gnss.time, spline_dt, t_start_global, gnss.blh, gnss_sqrt_info);
@@ -240,11 +248,12 @@ int main(int argc, char** argv) {
 
     // 6. Save Results
     std::string result_file = output_path + "/ct_trajectory.txt";
-    FileSaver saver(result_file);
+    // 8 columns: time, x, y, z, qx, qy, qz, qw
+    FileSaver saver(result_file, 8); 
     
     double output_interval = config["kf_interval_sec"] ? config["kf_interval_sec"].as<double>() : 0.1;
     for (double t = t_start_global + spline_dt; t < t_end_global - spline_dt; t += output_interval) {
-        int k = findControlPointIndex(t, t_start_global, spline_dt, control_points.size());
+        int k = findControlPointIndex(t, t_start_global, spline_dt, (int)control_points.size());
         if (k < 0 || k + 3 >= (int)control_points.size()) continue;
 
         double u = (t - (t_start_global + k * spline_dt)) / spline_dt;
@@ -253,12 +262,15 @@ int main(int argc, char** argv) {
             control_points[k+2].pose(), control_points[k+3].pose());
         
         // 保存格式: time, x, y, z, qx, qy, qz, qw
-        saver.save(t, res.pose.translation(), res.pose.so3().unit_quaternion());
+        Eigen::Vector3d p = res.pose.translation();
+        Eigen::Quaterniond q = res.pose.so3().unit_quaternion();
+        saver.dump({t, p.x(), p.y(), p.z(), q.x(), q.y(), q.z(), q.w()});
     }
 
     LOG(INFO) << "Trajectory saved to: " << result_file;
 
     // 7. Comparison Script
+    /*
     if (config["comparison"] && config["comparison"]["enable"].as<bool>()) {
         std::string python_exe = "python"; 
         std::string script = config["comparison"]["python_script"].as<std::string>();
@@ -269,6 +281,7 @@ int main(int argc, char** argv) {
         int ret = std::system(cmd.c_str());
         if (ret != 0) LOG(WARNING) << "Comparison script returned non-zero code: " << ret;
     }
+    */
 
     return 0;
 }

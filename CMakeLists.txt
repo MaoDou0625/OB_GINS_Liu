@@ -147,10 +147,8 @@ add_executable(ob_gins_ct
     src/core/imu_processor.cc
     src/common/debug.cc
     src/common/interpolation.cc
-    src/common/earth.cc
     src/fileio/fileloader.cc
     src/fileio/filesaver.cc
-    src/fileio/gnssfileloader.cc
     src/factors/pose_manifold.cc
 )
 target_link_libraries(ob_gins_ct 

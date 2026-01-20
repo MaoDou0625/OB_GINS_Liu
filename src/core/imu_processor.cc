@@ -75,7 +75,7 @@ void StandardImuProcessor::AddFactors(ceres::Problem& problem,
     }
 
     for (const auto& imu : valid_imu_data_) {
-        int k = findControlPointIndex(imu.time, t0_spline, spline_dt, control_points.size());
+        int k = findControlPointIndex(imu.time, t0_spline, spline_dt, (int)control_points.size());
         if (k < 0 || k + 3 >= (int)control_points.size()) continue;
         double dt = imu.dt;
         if (dt < 1e-6) continue;
@@ -118,9 +118,10 @@ bool WheelImuProcessor::LoadConfig(const YAML::Node& config_node, const std::str
 
     if (config_node["extrinsic_rotation"]) {
         auto rpy = config_node["extrinsic_rotation"].as<std::vector<double>>();
-        Eigen::AngleAxisd roll(ceres::DegToRad(rpy[0]), Eigen::Vector3d::UnitX());
-        Eigen::AngleAxisd pitch(ceres::DegToRad(rpy[1]), Eigen::Vector3d::UnitY());
-        Eigen::AngleAxisd yaw(ceres::DegToRad(rpy[2]), Eigen::Vector3d::UnitZ());
+        double d2r = M_PI / 180.0;
+        Eigen::AngleAxisd roll(rpy[0] * d2r, Eigen::Vector3d::UnitX());
+        Eigen::AngleAxisd pitch(rpy[1] * d2r, Eigen::Vector3d::UnitY());
+        Eigen::AngleAxisd yaw(rpy[2] * d2r, Eigen::Vector3d::UnitZ());
         q_body_imu_initial_ = yaw * pitch * roll;
         q_body_imu_ = q_body_imu_initial_;
     }
@@ -169,7 +170,7 @@ void WheelImuProcessor::AddFactors(ceres::Problem& problem,
     }
 
     for (const auto& imu : valid_imu_data_) {
-        int k = findControlPointIndex(imu.time, t0_spline, spline_dt, control_points.size());
+        int k = findControlPointIndex(imu.time, t0_spline, spline_dt, (int)control_points.size());
         if (k < 0 || k + 3 >= (int)control_points.size()) continue;
 
         // 添加 NHC 因子 (侧向和垂向约束)

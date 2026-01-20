@@ -37,6 +37,8 @@ public:
     const std::vector<IMU>& GetImuData() const { return valid_imu_data_; }
     const std::string& GetName() const { return name_; }
 
+    double* GetLeverArmData() { return l_body_sensor_.data(); }
+
 protected:
     std::string name_;
     std::string file_path_;
