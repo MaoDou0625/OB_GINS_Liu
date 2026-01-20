@@ -170,4 +170,105 @@ int main(int argc, char** argv) {
     LOG(INFO) << "Final Time window: " << std::fixed << t_start_global << " to " << t_end_global 
               << " (Duration: " << (t_end_global - t_start_global) << "s)";
     
-    // ... (rest of main function) ...
+    // 3. Initialize Spline and Earth Model
+    double spline_dt = 1.0; 
+    if (config["kf_interval_sec"]) spline_dt = config["kf_interval_sec"].as<double>();
+    
+    Earth earth;
+    Vector3d gravity_l, omega_ie_l;
+    // 以第一点 GNSS 作为局部坐标系原点
+    Vector3d origin_ecef = earth.blh2ecef(valid_gnss.front().blh);
+
+    if (config["isearth"] && config["isearth"].as<bool>()) {
+        gravity_l = earth.gravity(valid_gnss.front().blh); // 导航系下的重力
+        omega_ie_l = earth.iewn(valid_gnss.front().blh(0)); // 导航系下的地球自转
+    } else {
+        gravity_l << 0, 0, -9.80665;
+        omega_ie_l.setZero();
+    }
+
+    // 4. Build Optimization Problem
+    ceres::Problem problem;
+    
+    // 初始化样条曲线控制点 (将 GNSS 转换为局部 ENU 进行初始化)
+    std::vector<GNSS> gnss_enu = valid_gnss;
+    for (auto& g : gnss_enu) {
+        Vector3d ecef = earth.blh2ecef(g.blh);
+        g.blh = earth.ecef2enu(ecef, valid_gnss.front().blh); // 借用 blh 字段存储 ENU
+    }
+
+    SplineInitializer initializer(spline_dt);
+    std::vector<ControlPoint> control_points = initializer.init(gnss_enu, t_start_global);
+
+    // 设置位姿流形
+    for (auto& cp : control_points) {
+        problem.AddParameterBlock(cp.pose_data(), 7);
+        problem.SetManifold(cp.pose_data(), new SophusSE3Manifold());
+        problem.AddParameterBlock(cp.bg_data(), 3);
+        problem.AddParameterBlock(cp.ba_data(), 3);
+    }
+
+    // 添加 GNSS 因子
+    Matrix3d gnss_sqrt_info = Vector3d(1.0/0.1, 1.0/0.1, 1.0/0.2).asDiagonal(); // 假设 10cm 精度
+    for (const auto& gnss : gnss_enu) {
+        int k = findControlPointIndex(gnss.time, t_start_global, spline_dt, control_points.size());
+        if (k < 0 || k + 3 >= (int)control_points.size()) continue;
+
+        auto* factor = ContinuousGnssFactor::Create(gnss.time, spline_dt, t_start_global, gnss.blh, gnss_sqrt_info);
+        problem.AddResidualBlock(factor, nullptr, 
+            control_points[k].pose_data(), control_points[k+1].pose_data(), 
+            control_points[k+2].pose_data(), control_points[k+3].pose_data(),
+            imu_processors[0]->GetLeverArmData() // 假设使用主 IMU 杆臂
+        );
+    }
+
+    // 添加所有 IMU 约束 (Standard + Wheel)
+    for (auto& processor : imu_processors) {
+        processor->AddFactors(problem, control_points, spline_dt, t_start_global, gravity_l, omega_ie_l);
+        processor->AddBiasFactors(problem, control_points, spline_dt);
+    }
+
+    // 5. Solve
+    ceres::Solver::Options options;
+    options.linear_solver_type = ceres::SPARSE_NORMAL_CHOLESKY;
+    options.max_num_iterations = config["num_iterations"] ? config["num_iterations"].as<int>() : 20;
+    options.minimizer_progress_to_stdout = true;
+
+    ceres::Solver::Summary summary;
+    ceres::Solve(options, &problem, &summary);
+    LOG(INFO) << summary.BriefReport();
+
+    // 6. Save Results
+    std::string result_file = output_path + "/ct_trajectory.txt";
+    FileSaver saver(result_file);
+    
+    double output_interval = config["kf_interval_sec"] ? config["kf_interval_sec"].as<double>() : 0.1;
+    for (double t = t_start_global + spline_dt; t < t_end_global - spline_dt; t += output_interval) {
+        int k = findControlPointIndex(t, t_start_global, spline_dt, control_points.size());
+        if (k < 0 || k + 3 >= (int)control_points.size()) continue;
+
+        double u = (t - (t_start_global + k * spline_dt)) / spline_dt;
+        auto res = BSplineEvaluator::Evaluate<double>(u, spline_dt, 
+            control_points[k].pose(), control_points[k+1].pose(), 
+            control_points[k+2].pose(), control_points[k+3].pose());
+        
+        // 保存格式: time, x, y, z, qx, qy, qz, qw
+        saver.save(t, res.pose.translation(), res.pose.so3().unit_quaternion());
+    }
+
+    LOG(INFO) << "Trajectory saved to: " << result_file;
+
+    // 7. Comparison Script
+    if (config["comparison"] && config["comparison"]["enable"].as<bool>()) {
+        std::string python_exe = "python"; 
+        std::string script = config["comparison"]["python_script"].as<std::string>();
+        std::string truth = config["comparison"]["truth_file"].as<std::string>();
+        
+        std::string cmd = python_exe + " " + script + " --result " + result_file + " --truth " + truth;
+        LOG(INFO) << "Running comparison: " << cmd;
+        int ret = std::system(cmd.c_str());
+        if (ret != 0) LOG(WARNING) << "Comparison script returned non-zero code: " << ret;
+    }
+
+    return 0;
+}
