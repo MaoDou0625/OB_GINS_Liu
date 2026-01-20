@@ -39,6 +39,8 @@ public:
 
     double* GetLeverArmData() { return l_body_sensor_.data(); }
 
+    void SaveErrors(const std::string& output_path, const std::vector<spline::ControlPoint>& control_points, double spline_dt, double t_start_global);
+
 protected:
     std::string name_;
     std::string file_path_;

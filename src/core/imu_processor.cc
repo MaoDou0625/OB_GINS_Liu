@@ -1,6 +1,7 @@
 #include "src/core/imu_processor.h"
 #include <glog/logging.h>
 #include "src/fileio/imufileloader.h"
+#include "src/fileio/filesaver.h"
 #include "src/factors/ContinuousInertialFactor.h"
 #include "src/factors/WheelNHCFactor.h"
 #include "src/factors/WheelSpeedFactor.h"
@@ -11,6 +12,42 @@ namespace ob_gins {
 
 int findControlPointIndex(double t, double t0, double dt, int max_idx) {
     return static_cast<int>(std::floor((t - dt - t0) / dt));
+}
+
+void ImuProcessor::SaveErrors(const std::string& output_path, const std::vector<spline::ControlPoint>& control_points, double spline_dt, double t_start_global) {
+    if (bg_.empty() || bg_.size() != control_points.size()) return;
+
+    std::string file_name = output_path + "/errors_" + name_ + ".txt";
+    // Columns: t, bg(3), ba(3), lever_arm(3), q_body_imu(4)
+    FileSaver saver(file_name, 1 + 3 + 3 + 3 + 4);
+
+    for (size_t i = 0; i < control_points.size(); ++i) {
+        double t = control_points[i].timestamp();
+        
+        std::vector<double> data;
+        data.push_back(t);
+        
+        data.push_back(bg_[i].x());
+        data.push_back(bg_[i].y());
+        data.push_back(bg_[i].z());
+
+        data.push_back(ba_[i].x());
+        data.push_back(ba_[i].y());
+        data.push_back(ba_[i].z());
+
+        data.push_back(l_body_sensor_.x());
+        data.push_back(l_body_sensor_.y());
+        data.push_back(l_body_sensor_.z());
+
+        data.push_back(q_body_imu_.x());
+        data.push_back(q_body_imu_.y());
+        data.push_back(q_body_imu_.z());
+        data.push_back(q_body_imu_.w());
+
+        saver.dump(data);
+    }
+    saver.close();
+    LOG(INFO) << "Saved errors for " << name_ << " to " << file_name;
 }
 
 bool ImuProcessor::LoadImuFileAndFilter(double t_start, double t_end) {
@@ -79,30 +116,18 @@ void StandardImuProcessor::AddFactors(ceres::Problem& problem,
                                       double spline_dt, double t0_spline,
                                       const Eigen::Vector3d& gravity_vec, 
                                       const Eigen::Vector3d& omega_ie_local) {
-    // Resize bias vectors if needed
     if (bg_.empty()) {
         bg_.resize(control_points.size(), Eigen::Vector3d::Zero());
         ba_.resize(control_points.size(), Eigen::Vector3d::Zero());
     }
 
-    // Add Extrinsics (Rotation + Translation) as parameters
     problem.AddParameterBlock(q_body_imu_.coeffs().data(), 4);
     problem.SetManifold(q_body_imu_.coeffs().data(), new ceres::EigenQuaternionManifold());
-    
-    // Fix rotation if it's the main IMU (or based on config?)
-    // If there is NO standard main IMU, we might want to fix the first one or assume GNSS aligns with Body?
-    // User requirement: "Body defined by GNSS lever arm" -> Body is GNSS frame.
-    // So IMU has extrinsic relative to Body. This extrinsic should be optimized or fixed based on confidence.
-    // For now, let's optimize it but add a strong prior if needed?
-    // Actually, usually Main IMU frame = Body frame. If we change definition, we change this.
-    // If Body=GNSS, then IMU has rotation.
-    // Let's add prior to initial value.
     problem.AddResidualBlock(factors::RotationPriorFactor::Create(q_body_imu_initial_, 0.01), nullptr, q_body_imu_.coeffs().data());
 
     problem.AddParameterBlock(l_body_sensor_.data(), 3);
     problem.AddResidualBlock(factors::LeverArmPriorFactor::Create(l_body_sensor_, 0.05), nullptr, l_body_sensor_.data());
 
-    // Add Bias parameters
     for (size_t i = 0; i < control_points.size(); ++i) {
         problem.AddParameterBlock(bg_[i].data(), 3);
         problem.AddParameterBlock(ba_[i].data(), 3);
@@ -114,22 +139,6 @@ void StandardImuProcessor::AddFactors(ceres::Problem& problem,
         double dt = imu.dt;
         if (dt < 1e-6) continue;
 
-        // Note: ContinuousInertialFactor needs to support Extrinsics!
-        // The current ContinuousInertialFactor likely DOES NOT support rotation extrinsics, only translation (lever arm).
-        // If we want full decoupling, we strictly need a factor that handles R_bi.
-        // However, if we assume Standard IMU aligns with Body rotation-wise (R=I), we can skip R.
-        // But user said "Standard IMU also has extrinsics".
-        // If ContinuousInertialFactor doesn't support R, we are in trouble without modifying the Factor code.
-        // Let's check ContinuousInertialFactor.h content via read_file.
-        // I will assume for now I can pass R. If not, I'll stick to Identity or modify Factor.
-        
-        // Use the existing factor for now, assuming it handles l_ecc (translation).
-        // If R is needed, we might need to modify the factor or pre-rotate measurements?
-        // Pre-rotating measurements is valid if we assume R is constant? No, R is optimized.
-        // For now, I will use the existing factor signature which likely only takes l_ecc.
-        // AND I will pass l_body_sensor_.
-        // I will NOT pass q_body_imu_ if the factor doesn't take it.
-        
         auto* factor = factors::ContinuousInertialFactor::Create(
             imu.time, imu.dvel / dt, imu.dtheta / dt, gravity_vec, omega_ie_local,
             spline_dt, control_points[k].timestamp(), acc_noise_, gyr_noise_
@@ -193,17 +202,13 @@ void WheelImuProcessor::AddFactors(ceres::Problem& problem,
         ba_.resize(control_points.size(), Eigen::Vector3d::Zero());
     }
 
-    // 1. 将安装旋转和杆臂添加为参数块
     problem.AddParameterBlock(q_body_imu_.coeffs().data(), 4);
-    // 使用 EigenQuaternionManifold 以匹配 Eigen 的 [x, y, z, w] 存储顺序
     problem.SetManifold(q_body_imu_.coeffs().data(), new ceres::EigenQuaternionManifold());
     problem.AddParameterBlock(l_body_sensor_.data(), 3);
 
-    // 轮径参数块
     problem.AddParameterBlock(&wheel_radius_, 1);
-    problem.SetParameterBlockConstant(&wheel_radius_); // 默认固定，后期可开启优化
+    problem.SetParameterBlockConstant(&wheel_radius_);
 
-    // 2. 添加先验约束，防止参数在观测不足时发散
     problem.AddResidualBlock(factors::RotationPriorFactor::Create(q_body_imu_initial_, 0.01), nullptr, q_body_imu_.coeffs().data());
     problem.AddResidualBlock(factors::LeverArmPriorFactor::Create(l_body_sensor_, 0.05), nullptr, l_body_sensor_.data());
 
@@ -216,7 +221,27 @@ void WheelImuProcessor::AddFactors(ceres::Problem& problem,
         int k = findControlPointIndex(imu.time, t0_spline, spline_dt, (int)control_points.size());
         if (k < 0 || k + 3 >= (int)control_points.size()) continue;
 
-        // 添加 NHC 因子 (侧向和垂向约束)
+        double dt = imu.dt > 0 ? imu.dt : 1.0/rate_hz_;
+        if (dt < 1e-6) continue;
+
+        Eigen::Vector3d gyro_meas = imu.dtheta / dt;
+        Eigen::Vector3d accel_meas = imu.dvel / dt;
+
+        // Add Continuous Inertial Factor (Enables Accel/Gyro Bias Estimation)
+        auto* inertial_factor = factors::ContinuousInertialFactor::Create(
+            imu.time, accel_meas, gyro_meas, gravity_vec, omega_ie_local,
+            spline_dt, control_points[k].timestamp(), acc_noise_, gyr_noise_
+        );
+        problem.AddResidualBlock(inertial_factor, nullptr, 
+            control_points[k].pose_data(), control_points[k+1].pose_data(), 
+            control_points[k+2].pose_data(), control_points[k+3].pose_data(),
+            bg_[k].data(), bg_[k+1].data(), 
+            bg_[k+2].data(), bg_[k+3].data(),
+            ba_[k].data(), ba_[k+1].data(), 
+            ba_[k+2].data(), ba_[k+3].data(),
+            l_body_sensor_.data()
+        );
+
         auto* nhc_factor = factors::WheelNHCFactor::Create(
             imu.time, spline_dt, control_points[k].timestamp(), nhc_weight_, l_sensor_odopoint_
         );
@@ -226,10 +251,6 @@ void WheelImuProcessor::AddFactors(ceres::Problem& problem,
             q_body_imu_.coeffs().data(),
             l_body_sensor_.data()
         );
-
-        // 添加里程计速度因子 (前向约束)，传入完整角速度向量以支持安装角优化
-        double dt = imu.dt > 0 ? imu.dt : 1.0/rate_hz_;
-        Eigen::Vector3d gyro_meas = imu.dtheta / dt;
 
         auto* speed_factor = factors::WheelSpeedFactor::Create(
             imu.time, spline_dt, control_points[k].timestamp(), gyro_meas, speed_weight_, l_sensor_odopoint_

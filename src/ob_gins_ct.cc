@@ -13,6 +13,8 @@
 
 #include "src/common/types.h"
 #include "src/common/earth.h"
+#include "src/common/angle.h"
+#include "src/common/rotation.h"
 #include "src/fileio/imufileloader.h"
 #include "src/fileio/gnssfileloader.h"
 #include "src/fileio/filesaver.h"
@@ -92,37 +94,31 @@ int main(int argc, char** argv) {
     // Iterate through config to find all IMU entries
     for (YAML::const_iterator it = config.begin(); it != config.end(); ++it) {
         std::string key = it->first.as<std::string>();
-        if (key.rfind("imu", 0) == 0 && it->second.IsMap()) { // Check if key starts with "imu" and is a map
-            if (it->second["type"]) {
-                std::string type = it->second["type"].as<std::string>();
-                if (type == "standard") {
-                    auto processor = std::make_unique<StandardImuProcessor>();
-                    if (processor->LoadConfig(it->second, key)) {
-                        imu_processors.push_back(std::move(processor));
-                        // If this is the main IMU, use its bias random walk for global bias terms
-                        if (key == "imu_main" && it->second["imunoise"]) {
-                            const auto& noise_node = it->second["imunoise"];
-                            if (noise_node["accel_bias_rw"]) global_acc_bias_rw = noise_node["accel_bias_rw"].as<double>();
-                            else if (noise_node["abstd"]) global_acc_bias_rw = noise_node["abstd"].as<double>();
-                            
-                            if (noise_node["gyro_bias_rw"]) global_gyr_bias_rw = noise_node["gyro_bias_rw"].as<double>();
-                            else if (noise_node["gbstd"]) global_gyr_bias_rw = noise_node["gbstd"].as<double>();
-                        }
-                    } else {
-                        LOG(ERROR) << "Failed to load config for Standard IMU: " << key;
-                    }
-                } else if (type == "wheel") {
-                    auto processor = std::make_unique<WheelImuProcessor>();
-                    if (processor->LoadConfig(it->second, key)) {
-                        imu_processors.push_back(std::move(processor));
-                    } else {
-                        LOG(ERROR) << "Failed to load config for Wheel IMU: " << key;
+        if (it->second.IsMap() && it->second["type"]) { 
+            std::string type = it->second["type"].as<std::string>();
+            if (type == "standard") {
+                auto processor = std::make_unique<StandardImuProcessor>();
+                if (processor->LoadConfig(it->second, key)) {
+                    imu_processors.push_back(std::move(processor));
+                    // If this is the main IMU, use its bias random walk for global bias terms
+                    if (key == "imu_main" && it->second["imunoise"]) {
+                        const auto& noise_node = it->second["imunoise"];
+                        if (noise_node["accel_bias_rw"]) global_acc_bias_rw = noise_node["accel_bias_rw"].as<double>();
+                        else if (noise_node["abstd"]) global_acc_bias_rw = noise_node["abstd"].as<double>();
+                        
+                        if (noise_node["gyro_bias_rw"]) global_gyr_bias_rw = noise_node["gyro_bias_rw"].as<double>();
+                        else if (noise_node["gbstd"]) global_gyr_bias_rw = noise_node["gbstd"].as<double>();
                     }
                 } else {
-                    LOG(WARNING) << "Unknown IMU type '" << type << "' for sensor: " << key;
+                    LOG(ERROR) << "Failed to load config for Standard IMU: " << key;
                 }
-            } else {
-                LOG(WARNING) << "IMU config for '" << key << "' is missing 'type' field. Skipping.";
+            } else if (type == "wheel") {
+                auto processor = std::make_unique<WheelImuProcessor>();
+                if (processor->LoadConfig(it->second, key)) {
+                    imu_processors.push_back(std::move(processor));
+                } else {
+                    LOG(ERROR) << "Failed to load config for Wheel IMU: " << key;
+                }
             }
         }
     }
@@ -252,8 +248,8 @@ int main(int argc, char** argv) {
 
     // 6. Save Results
     std::string result_file = output_path + "/ct_trajectory.txt";
-    // 8 columns: time, x, y, z, qx, qy, qz, qw
-    FileSaver saver(result_file, 8); 
+    // 10 columns: time, lat, lon, alt, vx, vy, vz, roll, pitch, yaw
+    FileSaver saver(result_file, 10); 
     
     double output_interval = config["kf_interval_sec"] ? config["kf_interval_sec"].as<double>() : 0.1;
     for (double t = t_start_global + spline_dt; t < t_end_global - spline_dt; t += output_interval) {
@@ -265,15 +261,30 @@ int main(int argc, char** argv) {
             control_points[k].pose(), control_points[k+1].pose(), 
             control_points[k+2].pose(), control_points[k+3].pose());
         
-        // 保存格式: time, x, y, z, qx, qy, qz, qw
-        Eigen::Vector3d p = res.pose.translation();
-        Eigen::Quaterniond q = res.pose.so3().unit_quaternion();
-        saver.dump({t, p.x(), p.y(), p.z(), q.x(), q.y(), q.z(), q.w()});
+        // Position: ENU -> BLH
+        Vector3d enu_pos = res.pose.translation();
+        Vector3d blh = earth.local2global(valid_gnss.front().blh, enu_pos);
+        blh[0] *= R2D; // Rad to Deg
+        blh[1] *= R2D;
+
+        // Velocity: ENU
+        Vector3d vel = res.v_world;
+
+        // Attitude: ENU Quaternion -> Euler (Deg)
+        Vector3d euler = Rotation::quaternion2euler(res.pose.so3().unit_quaternion());
+        euler *= R2D;
+
+        saver.dump({t, blh[0], blh[1], blh[2], vel.x(), vel.y(), vel.z(), euler[0], euler[1], euler[2]});
     }
 
     saver.close(); // Ensure file is flushed before python script reads it
 
     LOG(INFO) << "Trajectory saved to: " << result_file;
+
+    // Save Errors for each IMU
+    for (auto& processor : imu_processors) {
+        processor->SaveErrors(output_path, control_points, spline_dt, t_start_global);
+    }
 
     // 7. Comparison Script
     if (config["comparison"] && config["comparison"]["enable"].as<bool>()) {
