@@ -57,10 +57,16 @@ def main():
         print(f"Error: Result file {args.result} not found.")
         return
 
-    # 加载结果数据: time, x, y, z, qx, qy, qz, qw (局部坐标系)
+    # 加载结果数据: time, x, y, z, qx, qy, qz, qw (局部坐标系 NED)
     res_data = np.loadtxt(args.result)
     res_time = res_data[:, 0]
-    res_pos = res_data[:, 1:4]
+    # NED (North, East, Down) -> ENU (East, North, Up)
+    # x -> y, y -> x, z -> -z
+    res_pos_ned = res_data[:, 1:4]
+    res_pos = np.zeros_like(res_pos_ned)
+    res_pos[:, 0] = res_pos_ned[:, 1]  # East = NED_y
+    res_pos[:, 1] = res_pos_ned[:, 0]  # North = NED_x
+    res_pos[:, 2] = -res_pos_ned[:, 2] # Up = -NED_z
 
     # 加载真值数据: time, lat, lon, h, ...
     # 假设 GnssFileLoader 格式为: time, lat, lon, h
