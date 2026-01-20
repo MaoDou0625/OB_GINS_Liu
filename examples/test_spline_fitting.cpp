@@ -67,8 +67,7 @@ int main() {
 
     // Add parameter blocks for Control Points
     for (auto& cp : control_points) {
-        problem.AddParameterBlock(cp.pose_data(), 7, 
-            new ceres::AutoDiffManifold<SophusSE3Plus, 7, 6>);
+        problem.AddParameterBlock(cp.pose_data(), 7, new SophusSE3Manifold());
     }
 
     // 4. Add Factors

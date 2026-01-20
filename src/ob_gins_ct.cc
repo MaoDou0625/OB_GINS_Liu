@@ -165,6 +165,14 @@ int main(int argc, char** argv) {
     Vector3d gravity_vec(0, 0, -g_mag);
     LOG(INFO) << "Local gravity magnitude: " << g_mag << " -> Vector: " << gravity_vec.transpose();
 
+    // Calculate Earth Rotation in Local Frame
+    // Local Frame is N-frame (NED) at origin.
+    // omega_ie_n = R_e^n * omega_ie_e
+    Vector3d omega_ie_e(0, 0, WGS84_WIE);
+    Matrix3d R_n_e = Earth::cne(station_origin);
+    Vector3d omega_ie_local = R_n_e.transpose() * omega_ie_e;
+    LOG(INFO) << "Earth Rotation in Local Frame: " << omega_ie_local.transpose();
+
     // Load Calibration & Noise
     bool optimize_leverarm = false;
     Vector3d initial_l_gnss = Vector3d::Zero();
@@ -303,7 +311,7 @@ int main(int argc, char** argv) {
             Vector3d accel_rate = imu.dvel / dt;
             
             auto* factor = ContinuousInertialFactor::Create(
-                imu.time, accel_rate, gyro_rate, gravity_vec, 
+                imu.time, accel_rate, gyro_rate, gravity_vec, omega_ie_local,
                 spline_dt, control_points[k].timestamp(), acc_noise, gyr_noise
             );
             

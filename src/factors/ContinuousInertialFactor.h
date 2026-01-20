@@ -13,10 +13,10 @@ namespace factors {
 struct ContinuousInertialFactor {
     // Note: l_ga is now an optimization parameter block, not a fixed member
     ContinuousInertialFactor(double t_meas, const Eigen::Vector3d& accel_meas, const Eigen::Vector3d& gyro_meas,
-                             const Eigen::Vector3d& gravity,
+                             const Eigen::Vector3d& gravity, const Eigen::Vector3d& omega_ie,
                              double dt, double t0, double sigma_a, double sigma_g)
         : t_meas_(t_meas), accel_meas_(accel_meas), gyro_meas_(gyro_meas),
-          gravity_(gravity), dt_(dt), t0_(t0), sigma_a_(sigma_a), sigma_g_(sigma_g) {}
+          gravity_(gravity), omega_ie_(omega_ie), dt_(dt), t0_(t0), sigma_a_(sigma_a), sigma_g_(sigma_g) {}
 
     template <typename T>
     bool operator()(const T* const cp0, const T* const cp1, const T* const cp2, const T* const cp3,
@@ -58,11 +58,19 @@ struct ContinuousInertialFactor {
         Vec3T ba = ba1_vec * (T(1.0) - u) + ba2_vec * u;
 
         // 4. Gyro Residual
-        Vec3T gyro_pred = res.w_body + bg;
+        // w_meas = R_L^b * (w_ie_L) + w_Lb_b + bias
+        // w_pred = res.w_body + bg + R_b^L^T * w_ie_L
+        Vec3T w_ie_b = res.pose.so3().inverse() * omega_ie_.cast<T>();
+        Vec3T gyro_pred = res.w_body + bg + w_ie_b;
         Vec3T resid_g =  gyro_meas_.cast<T>() - gyro_pred;
 
         // 5. Accel Residual
-        Vec3T acc_gyro = res.pose.so3().inverse() * (res.a_world - gravity_.cast<T>());
+        // f_b = R_L^b * (a_L - g_L + 2 * w_ie_L x v_L)
+        // Note: omega_ie is constant in L frame (if L is earth-fixed)
+        Vec3T coriolis = T(2.0) * omega_ie_.cast<T>().cross(res.v_world);
+        Vec3T acc_inertial = res.a_world - gravity_.cast<T>() + coriolis;
+        
+        Vec3T acc_gyro = res.pose.so3().inverse() * acc_inertial;
 
         // Lever Arm Effect (Centrifugal + Tangential)
         Vec3T w = res.w_body;
@@ -89,7 +97,7 @@ struct ContinuousInertialFactor {
     }
 
     static ceres::CostFunction* Create(double t_meas, const Eigen::Vector3d& accel, const Eigen::Vector3d& gyro,
-                                       const Eigen::Vector3d& g,
+                                       const Eigen::Vector3d& g, const Eigen::Vector3d& omega_ie,
                                        double dt, double t0, double sigma_a, double sigma_g) {
         // Residuals: 6
         // Param Blocks: 
@@ -102,7 +110,7 @@ struct ContinuousInertialFactor {
             3, 3, 3, 3,  // Bg 0-3
             3, 3, 3, 3,  // Ba 0-3
             3            // l_ga
-        >(new ContinuousInertialFactor(t_meas, accel, gyro, g, dt, t0, sigma_a, sigma_g));
+        >(new ContinuousInertialFactor(t_meas, accel, gyro, g, omega_ie, dt, t0, sigma_a, sigma_g));
     }
 
 private:
@@ -110,6 +118,7 @@ private:
     Eigen::Vector3d accel_meas_;
     Eigen::Vector3d gyro_meas_;
     Eigen::Vector3d gravity_;
+    Eigen::Vector3d omega_ie_;
     double dt_;
     double t0_;
     double sigma_a_;

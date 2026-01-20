@@ -53,7 +53,7 @@ int main() {
 
     // Parameters: Control Points & Biases (Fixed)
     for (int i = 0; i < num_cp; ++i) {
-        problem.AddParameterBlock(control_points[i].pose_data(), 7, new ceres::AutoDiffManifold<SophusSE3Plus, 7, 6>());
+        problem.AddParameterBlock(control_points[i].pose_data(), 7, new SophusSE3Manifold());
         problem.SetParameterBlockConstant(control_points[i].pose_data());
         
         problem.AddParameterBlock(bg[i].data(), 3);
@@ -88,8 +88,8 @@ int main() {
         Eigen::Vector3d accel_meas = alpha.cross(true_l_ga) + w.cross(w.cross(true_l_ga));
         
         ceres::CostFunction* cost_function = ContinuousInertialFactor::Create(
-            t, accel_meas, gyro_meas, gravity,
-            dt_spline, control_points[idx].timestamp()
+            t, accel_meas, gyro_meas, gravity, Eigen::Vector3d::Zero(),
+            dt_spline, control_points[idx].timestamp(), 1.0, 1.0
         );
 
         problem.AddResidualBlock(cost_function, nullptr,

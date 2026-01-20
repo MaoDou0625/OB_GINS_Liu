@@ -123,7 +123,7 @@ int main() {
         if(idx < 0 || idx + 3 >= cps.size()) continue;
 
         auto* cost = ContinuousInertialFactor::Create(
-            t, a_meas, w_meas, gravity, dt_spline, cps[idx].timestamp() 
+            t, a_meas, w_meas, gravity, Eigen::Vector3d::Zero(), dt_spline, cps[idx].timestamp(), 1.0, 1.0
         );
         
         // Correct usage: pose_data()

@@ -66,8 +66,8 @@ int main() {
     
     // 构建 Factor
     auto* factor = ContinuousInertialFactor::Create(
-        t_query, accel_meas, gyro_meas, gravity, 
-        dt_spline, control_points[0].timestamp()
+        t_query, accel_meas, gyro_meas, gravity, Eigen::Vector3d::Zero(),
+        dt_spline, control_points[0].timestamp(), 1.0, 1.0
     );
 
     double residuals[6];
