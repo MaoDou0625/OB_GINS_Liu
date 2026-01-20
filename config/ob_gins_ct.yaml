@@ -103,7 +103,7 @@ aligntime: 3
 kf_interval_sec: 0.1
 
 # Solver and Physics
-num_iterations: 20
+num_iterations: 50
 isearth: true
 
 # Debug and Comparison

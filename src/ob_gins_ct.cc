@@ -270,7 +270,6 @@ int main(int argc, char** argv) {
     LOG(INFO) << "Trajectory saved to: " << result_file;
 
     // 7. Comparison Script
-    /*
     if (config["comparison"] && config["comparison"]["enable"].as<bool>()) {
         std::string python_exe = "python"; 
         std::string script = config["comparison"]["python_script"].as<std::string>();
@@ -281,7 +280,6 @@ int main(int argc, char** argv) {
         int ret = std::system(cmd.c_str());
         if (ret != 0) LOG(WARNING) << "Comparison script returned non-zero code: " << ret;
     }
-    */
 
     return 0;
 }
